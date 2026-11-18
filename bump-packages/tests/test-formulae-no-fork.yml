@@ -1,0 +1,48 @@
+name: Test formulae bump without fork
+on:
+  workflow_dispatch:
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - name: Set up mock brew and deprecation script
+        run: |
+          set -e
+          DEP="$GITHUB_WORKSPACE/../deprecate-master.sh"
+          if [ ! -f "$DEP" ]; then
+            printf '#!/bin/sh\necho "deprecation check: $*"\n' > "$DEP"
+            chmod +x "$DEP"
+          fi
+          mkdir -p /tmp/mockbin
+          cat > /tmp/mockbin/brew <<'EOF'
+          #!/bin/bash
+          {
+            printf 'ARGS:'
+            printf ' %s' "$@"
+            printf '\n'
+            echo "DEV:${HOMEBREW_DEVELOPER}"
+            if [ -n "${HOMEBREW_GITHUB_API_TOKEN}" ]; then echo "TOKEN:set"; else echo "TOKEN:unset"; fi
+          } >> /tmp/brew.log
+          EOF
+          chmod +x /tmp/mockbin/brew
+          rm -f /tmp/brew.log
+          echo "/tmp/mockbin" >> "$GITHUB_PATH"
+      - id: action
+        uses: .
+        with:
+          token: ${{ github.token }}
+          formulae: foo bar
+          fork: "false"
+      - name: Assert brew invoked correctly
+        run: |
+          cat /tmp/brew.log || { echo "FAIL: brew not invoked"; exit 1; }
+          ARGS="$(grep '^ARGS:' /tmp/brew.log)"
+          echo "args: $ARGS"
+          if [ "$ARGS" != "ARGS: bump --no-fork --open-pr --formulae foo bar" ]; then
+            echo "FAIL: unexpected args"
+            exit 1
+          fi
+          grep -qx 'DEV:1' /tmp/brew.log || { echo "FAIL: HOMEBREW_DEVELOPER not 1"; exit 1; }
+          grep -qx 'TOKEN:set' /tmp/brew.log || { echo "FAIL: token not passed"; exit 1; }
+          echo "PASS"

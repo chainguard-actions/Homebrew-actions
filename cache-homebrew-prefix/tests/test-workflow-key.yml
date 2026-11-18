@@ -1,0 +1,37 @@
+name: Test workflow-key sanitization
+on:
+  workflow_dispatch:
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - name: Set up fake Homebrew
+        run: bash "$GITHUB_WORKSPACE/tests/fixtures/setup-fake-brew.sh"
+      - id: action
+        uses: .
+        with:
+          install: jq
+          workflow-key: "My Workflow!"
+      - name: Assert cache-prefix includes sanitized workflow key
+        env:
+          ACTUAL: ${{ steps.action.outputs.cache-prefix }}
+        run: |
+          . /etc/os-release
+          EXPECTED="${ID:-linux}-${VERSION_ID:-unknown}-$(uname -m)-My-Workflow"
+          echo "actual: $ACTUAL expected: $EXPECTED"
+          if [ "$ACTUAL" != "$EXPECTED" ]; then
+            echo "FAIL"
+            exit 1
+          fi
+          echo "PASS"
+      - name: Assert cache-key
+        env:
+          ACTUAL: ${{ steps.action.outputs.cache-key }}
+        run: |
+          echo "actual: $ACTUAL"
+          if [ "$ACTUAL" != "fakehash-jq" ]; then
+            echo "FAIL: expected fakehash-jq"
+            exit 1
+          fi
+          echo "PASS"

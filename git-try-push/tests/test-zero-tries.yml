@@ -1,0 +1,43 @@
+name: Test zero tries
+on:
+  workflow_dispatch:
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - name: Set up local repo and bare remote
+        run: |
+          set -e
+          rm -rf /tmp/gtp-zero
+          mkdir -p /tmp/gtp-zero
+          cd /tmp/gtp-zero
+          git init --bare -b main remote.git
+          git init -b main local
+          cd local
+          git config user.email "test@example.com"
+          git config user.name "Test User"
+          echo one > file.txt
+          git add file.txt
+          git commit -m "first"
+          git remote add origin /tmp/gtp-zero/remote.git
+          git push origin main
+          git rev-parse HEAD > /tmp/gtp-zero/initial
+          echo two >> file.txt
+          git commit -am "second"
+      - id: action
+        uses: .
+        with:
+          directory: /tmp/gtp-zero/local
+          tries: "0"
+      - name: Assert remote unchanged
+        run: |
+          EXPECTED="$(cat /tmp/gtp-zero/initial)"
+          ACTUAL="$(git --git-dir=/tmp/gtp-zero/remote.git rev-parse main)"
+          echo "expected: $EXPECTED"
+          echo "actual: $ACTUAL"
+          if [ "$EXPECTED" != "$ACTUAL" ]; then
+            echo "FAIL: remote should not have been pushed with tries=0"
+            exit 1
+          fi
+          echo "PASS"

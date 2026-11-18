@@ -1,0 +1,65 @@
+name: Test basic usage (default inputs, stable auto)
+on:
+  workflow_dispatch:
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - id: action
+        uses: .
+      - name: Assert gems outputs
+        shell: bash
+        env:
+          GEMS_PATH: ${{ steps.action.outputs.gems-path }}
+          GEMS_HASH: ${{ steps.action.outputs.gems-hash }}
+        run: |
+          echo "gems-path: $GEMS_PATH"
+          echo "gems-hash: $GEMS_HASH"
+          case "$GEMS_PATH" in
+            */Library/Homebrew/vendor/bundle/ruby/) ;;
+            *) echo "FAIL: unexpected gems-path"; exit 1 ;;
+          esac
+          if ! [[ "$GEMS_HASH" =~ ^[0-9a-f]{64}$ ]]; then
+            echo "FAIL: gems-hash is not a sha256"
+            exit 1
+          fi
+          echo "PASS"
+      - name: Assert tap outputs empty for non-tap repository
+        shell: bash
+        env:
+          REPO_PATH: ${{ steps.action.outputs.repository-path }}
+          TAP_NAME: ${{ steps.action.outputs.tap-name }}
+        run: |
+          echo "repository-path: '$REPO_PATH'"
+          echo "tap-name: '$TAP_NAME'"
+          if [ -n "$REPO_PATH" ] || [ -n "$TAP_NAME" ]; then
+            echo "FAIL: expected empty repository-path and tap-name"
+            exit 1
+          fi
+          echo "PASS"
+      - name: Assert brew works and stable tag is checked out
+        shell: bash
+        run: |
+          export PATH="/home/linuxbrew/.linuxbrew/bin:/opt/homebrew/bin:/usr/local/bin:$PATH"
+          brew --version || { echo "FAIL: brew not runnable"; exit 1; }
+          echo "HOMEBREW_UPDATE_TO_TAG=${HOMEBREW_UPDATE_TO_TAG:-}"
+          if [ "${HOMEBREW_UPDATE_TO_TAG:-}" != "1" ]; then
+            echo "FAIL: expected HOMEBREW_UPDATE_TO_TAG=1 for stable=auto on a non-tap repo"
+            exit 1
+          fi
+          branch="$(git -C "$(brew --repo)" symbolic-ref --short HEAD)"
+          echo "brew repo branch: $branch"
+          if [ "$branch" != "stable" ]; then
+            echo "FAIL: expected brew repo on 'stable' branch"
+            exit 1
+          fi
+          echo "PASS"
+      - name: Assert HOMEBREW_GITHUB_API_TOKEN exported from default brew-gh-api-token
+        shell: bash
+        run: |
+          if [ -z "${HOMEBREW_GITHUB_API_TOKEN:-}" ]; then
+            echo "FAIL: HOMEBREW_GITHUB_API_TOKEN not set"
+            exit 1
+          fi
+          echo "PASS"

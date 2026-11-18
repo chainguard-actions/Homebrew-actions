@@ -1,0 +1,55 @@
+name: Test basic install
+on:
+  workflow_dispatch:
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - name: Set up fake Homebrew
+        run: bash "$GITHUB_WORKSPACE/tests/fixtures/setup-fake-brew.sh"
+      - id: action
+        uses: .
+        with:
+          install: jq wget
+      - name: Assert prefix output
+        env:
+          ACTUAL: ${{ steps.action.outputs.prefix }}
+        run: |
+          echo "actual: $ACTUAL"
+          if [ "$ACTUAL" != "/tmp/fakebrew/prefix" ]; then
+            echo "FAIL: expected /tmp/fakebrew/prefix"
+            exit 1
+          fi
+          echo "PASS"
+      - name: Assert cache-prefix output
+        env:
+          ACTUAL: ${{ steps.action.outputs.cache-prefix }}
+        run: |
+          . /etc/os-release
+          EXPECTED="${ID:-linux}-${VERSION_ID:-unknown}-$(uname -m)"
+          echo "actual: $ACTUAL expected: $EXPECTED"
+          if [ "$ACTUAL" != "$EXPECTED" ]; then
+            echo "FAIL"
+            exit 1
+          fi
+          echo "PASS"
+      - name: Assert cache-key output
+        env:
+          ACTUAL: ${{ steps.action.outputs.cache-key }}
+        run: |
+          echo "actual: $ACTUAL"
+          if [ "$ACTUAL" != "fakehash-jq-wget" ]; then
+            echo "FAIL: expected fakehash-jq-wget"
+            exit 1
+          fi
+          grep -q 'version-hash.rb$' /tmp/fakebrew/ruby-script || { echo "FAIL: version-hash.rb not used"; exit 1; }
+          echo "PASS"
+      - name: Assert brew install was called
+        run: |
+          cat /tmp/fakebrew/calls.log
+          if ! grep -qx 'install --formula jq wget' /tmp/fakebrew/calls.log; then
+            echo "FAIL: brew install --formula jq wget not called"
+            exit 1
+          fi
+          echo "PASS"

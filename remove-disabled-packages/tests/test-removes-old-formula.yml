@@ -1,0 +1,74 @@
+name: Test removes formula disabled over a year ago
+on:
+  workflow_dispatch:
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - name: Set up fake brew, ruby and tap
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: bash "$GITHUB_WORKSPACE/tests/fixtures/fake-brew.sh" init
+      - name: Create tap fixtures
+        run: |
+          mkdir -p "$TAP_DIRECTORY/Formula"
+          for f in old recent active foreign; do
+            echo "# $f" > "$TAP_DIRECTORY/Formula/$f.rb"
+          done
+          cat > "$FORMULA_JSON" <<EOF
+          {"formulae":[
+            {"name":"old","tap":"$TAP_NAME","disabled":true,"disable_date":"$OLD_DATE","ruby_source_path":"Formula/old.rb"},
+            {"name":"recent","tap":"$TAP_NAME","disabled":true,"disable_date":"$RECENT_DATE","ruby_source_path":"Formula/recent.rb"},
+            {"name":"active","tap":"$TAP_NAME","disabled":false,"disable_date":"$OLD_DATE","ruby_source_path":"Formula/active.rb"},
+            {"name":"foreign","tap":"someone/else","disabled":true,"disable_date":"$OLD_DATE","ruby_source_path":"Formula/foreign.rb"}
+          ]}
+          EOF
+          cat "$FORMULA_JSON"
+          bash "$GITHUB_WORKSPACE/tests/fixtures/fake-brew.sh" commit
+      # The shipped action.yml references `uses: $/setup-ruby`, which act cannot
+      # resolve, so act marks the composite step as failed even though main.rb
+      # runs to completion. Tolerate that outcome and verify the real effects.
+      - id: action
+        uses: .
+        continue-on-error: true
+      - name: Assert outcome and packages-removed is true
+        env:
+          ACTUAL: ${{ steps.action.outputs.packages-removed }}
+          OUTCOME: ${{ steps.action.outcome }}
+        run: |
+          echo "outcome: $OUTCOME"
+          echo "actual: $ACTUAL"
+          if [ "$OUTCOME" != "success" ] && [ "$OUTCOME" != "failure" ]; then
+            echo "FAIL: unexpected outcome '$OUTCOME'"; exit 1
+          fi
+          if [ "$ACTUAL" != "true" ]; then
+            echo "FAIL: expected 'true'"
+            exit 1
+          fi
+          echo "PASS"
+      - name: Assert files and commits
+        run: |
+          ls -la "$TAP_DIRECTORY/Formula"
+          git -C "$TAP_DIRECTORY" log --format=%s
+          if [ -e "$TAP_DIRECTORY/Formula/old.rb" ]; then
+            echo "FAIL: old.rb should have been removed"; exit 1
+          fi
+          for f in recent active foreign; do
+            if [ ! -f "$TAP_DIRECTORY/Formula/$f.rb" ]; then
+              echo "FAIL: $f.rb should have been kept"; exit 1
+            fi
+          done
+          SUBJECT="$(git -C "$TAP_DIRECTORY" log -1 --format=%s)"
+          echo "latest commit: $SUBJECT"
+          if [ "$SUBJECT" != "old: remove formula" ]; then
+            echo "FAIL: expected latest commit 'old: remove formula'"; exit 1
+          fi
+          COUNT="$(git -C "$TAP_DIRECTORY" rev-list --count HEAD)"
+          if [ "$COUNT" != "2" ]; then
+            echo "FAIL: expected 2 commits, got $COUNT"; exit 1
+          fi
+          if [ -n "$(git -C "$TAP_DIRECTORY" status --porcelain)" ]; then
+            echo "FAIL: tap working tree not clean"; exit 1
+          fi
+          echo "PASS"

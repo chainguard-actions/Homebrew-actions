@@ -1,0 +1,43 @@
+name: Test missing or empty result file is a no-op
+on:
+  workflow_dispatch:
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - name: Create empty result file
+        run: |
+          mkdir -p /tmp/empty-workdir
+          : > /tmp/empty-workdir/empty.txt
+      - id: missing
+        uses: .
+        with:
+          workdir: /tmp/nonexistent-workdir
+          result_path: missing.txt
+          step_name: Missing File Heading Marker
+      - id: empty
+        uses: .
+        with:
+          workdir: /tmp/empty-workdir
+          result_path: empty.txt
+          step_name: Empty File Heading Marker
+      - name: Assert no-op behaviour
+        env:
+          MISSING_OUTCOME: ${{ steps.missing.outcome }}
+          EMPTY_OUTCOME: ${{ steps.empty.outcome }}
+        run: |
+          echo "missing: $MISSING_OUTCOME empty: $EMPTY_OUTCOME"
+          [ "$MISSING_OUTCOME" = "success" ] || { echo "FAIL: missing file step did not succeed"; exit 1; }
+          [ "$EMPTY_OUTCOME" = "success" ] || { echo "FAIL: empty file step did not succeed"; exit 1; }
+          if [ ! -e /tmp/empty-workdir/empty.txt ]; then
+            echo "FAIL: empty file should not be removed (action exits early)"
+            exit 1
+          fi
+          if [ -f "$GITHUB_STEP_SUMMARY" ]; then
+            if grep -qF 'Missing File Heading Marker' "$GITHUB_STEP_SUMMARY" || grep -qF 'Empty File Heading Marker' "$GITHUB_STEP_SUMMARY"; then
+              echo "FAIL: summary should not be written for missing/empty file"
+              exit 1
+            fi
+          fi
+          echo "PASS"

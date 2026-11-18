@@ -1,0 +1,68 @@
+name: Test retry with rebase
+on:
+  workflow_dispatch:
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - name: Set up diverged local repo and bare remote
+        run: |
+          set -e
+          rm -rf /tmp/gtp-retry
+          mkdir -p /tmp/gtp-retry
+          cd /tmp/gtp-retry
+          git init --bare -b main remote.git
+          git init -b main local
+          cd local
+          git config user.email "test@example.com"
+          git config user.name "Test User"
+          echo one > file.txt
+          git add file.txt
+          git commit -m "first"
+          git remote add origin /tmp/gtp-retry/remote.git
+          git push origin main
+          # Another clone pushes a non-conflicting commit
+          git clone -b main /tmp/gtp-retry/remote.git /tmp/gtp-retry/other
+          cd /tmp/gtp-retry/other
+          git config user.email "other@example.com"
+          git config user.name "Other User"
+          echo other > other.txt
+          git add other.txt
+          git commit -m "other"
+          git push origin main
+          git rev-parse HEAD > /tmp/gtp-retry/other-sha
+          # Local makes its own commit
+          cd /tmp/gtp-retry/local
+          echo local > local.txt
+          git add local.txt
+          git commit -m "local"
+      - id: action
+        uses: .
+        with:
+          directory: /tmp/gtp-retry/local
+          tries: "3"
+      - name: Assert remote contains both commits
+        run: |
+          set -e
+          R=/tmp/gtp-retry/remote.git
+          OTHER="$(cat /tmp/gtp-retry/other-sha)"
+          echo "remote log:"
+          git --git-dir=$R log --oneline main
+          if ! git --git-dir=$R merge-base --is-ancestor "$OTHER" main; then
+            echo "FAIL: other commit missing from remote main"
+            exit 1
+          fi
+          SUBJECT="$(git --git-dir=$R log -1 --format=%s main)"
+          echo "tip subject: $SUBJECT"
+          if [ "$SUBJECT" != "local" ]; then
+            echo "FAIL: expected rebased local commit at remote tip"
+            exit 1
+          fi
+          LOCAL="$(git -C /tmp/gtp-retry/local rev-parse main)"
+          REMOTE="$(git --git-dir=$R rev-parse main)"
+          if [ "$LOCAL" != "$REMOTE" ]; then
+            echo "FAIL: local main ($LOCAL) != remote main ($REMOTE)"
+            exit 1
+          fi
+          echo "PASS"

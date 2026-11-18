@@ -1,0 +1,46 @@
+name: Test custom workdir and result_path
+on:
+  workflow_dispatch:
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - name: Create result file in custom location
+        run: |
+          mkdir -p /tmp/custom-workdir/logs
+          echo "CUSTOM_PATH_MARKER" > /tmp/custom-workdir/logs/out.txt
+      - name: Start step-summary watcher (act truncates the summary file per step)
+        run: |
+          rm -f /tmp/summary-snapshot.md
+          SUMMARY_FILE="$GITHUB_STEP_SUMMARY"
+          export SUMMARY_FILE
+          setsid nohup bash -c '
+            while :; do
+              if grep -qF "### " "$SUMMARY_FILE" 2>/dev/null; then
+                cp "$SUMMARY_FILE" /tmp/summary-snapshot.tmp && mv /tmp/summary-snapshot.tmp /tmp/summary-snapshot.md
+              fi
+              sleep 0.01
+            done' > /dev/null 2>&1 < /dev/null &
+          echo $! > /tmp/summary-watcher.pid
+          sleep 0.2
+      - id: action
+        uses: .
+        with:
+          workdir: /tmp/custom-workdir
+          result_path: logs/out.txt
+          step_name: Custom Path Heading
+      - name: Assert custom result file removed and summarized
+        run: |
+          kill "$(cat /tmp/summary-watcher.pid)" 2>/dev/null || true
+          if [ -e /tmp/custom-workdir/logs/out.txt ]; then
+            echo "FAIL: custom result file should have been removed"
+            exit 1
+          fi
+          S=/tmp/summary-snapshot.md
+          echo "--- captured summary ---"
+          cat "$S" || { echo "FAIL: no summary captured"; exit 1; }
+          echo "------------------------"
+          grep -qF '### Custom Path Heading' "$S" || { echo "FAIL: heading missing"; exit 1; }
+          grep -qF 'CUSTOM_PATH_MARKER' "$S" || { echo "FAIL: content missing"; exit 1; }
+          echo "PASS"

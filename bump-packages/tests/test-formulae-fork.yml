@@ -1,0 +1,44 @@
+name: Test formulae bump with fork
+on:
+  workflow_dispatch:
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - name: Set up mock brew and deprecation script
+        run: |
+          set -e
+          DEP="$GITHUB_WORKSPACE/../deprecate-master.sh"
+          if [ ! -f "$DEP" ]; then
+            printf '#!/bin/sh\necho "deprecation check: $*"\n' > "$DEP"
+            chmod +x "$DEP"
+          fi
+          mkdir -p /tmp/mockbin
+          cat > /tmp/mockbin/brew <<'EOF'
+          #!/bin/bash
+          {
+            printf 'ARGS:'
+            printf ' %s' "$@"
+            printf '\n'
+          } >> /tmp/brew.log
+          EOF
+          chmod +x /tmp/mockbin/brew
+          rm -f /tmp/brew.log
+          echo "/tmp/mockbin" >> "$GITHUB_PATH"
+      - id: action
+        uses: .
+        with:
+          token: ${{ github.token }}
+          formulae: foo
+          fork: "true"
+      - name: Assert brew invoked correctly
+        run: |
+          cat /tmp/brew.log || { echo "FAIL: brew not invoked"; exit 1; }
+          ARGS="$(grep '^ARGS:' /tmp/brew.log)"
+          echo "args: $ARGS"
+          if [ "$ARGS" != "ARGS: bump --open-pr --formulae foo" ]; then
+            echo "FAIL: unexpected args"
+            exit 1
+          fi
+          echo "PASS"

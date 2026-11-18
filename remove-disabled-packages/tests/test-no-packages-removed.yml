@@ -1,0 +1,58 @@
+name: Test nothing removed when only recent or foreign packages are disabled
+on:
+  workflow_dispatch:
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - name: Set up fake brew, ruby and tap
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: bash "$GITHUB_WORKSPACE/tests/fixtures/fake-brew.sh" init
+      - name: Create tap fixtures
+        run: |
+          mkdir -p "$TAP_DIRECTORY/Formula"
+          echo "# recent" > "$TAP_DIRECTORY/Formula/recent.rb"
+          echo "# foreign" > "$TAP_DIRECTORY/Formula/foreign.rb"
+          cat > "$FORMULA_JSON" <<EOF
+          {"formulae":[
+            {"name":"recent","tap":"$TAP_NAME","disabled":true,"disable_date":"$RECENT_DATE","ruby_source_path":"Formula/recent.rb"},
+            {"name":"foreign","tap":"someone/else","disabled":true,"disable_date":"$OLD_DATE","ruby_source_path":"Formula/foreign.rb"}
+          ]}
+          EOF
+          bash "$GITHUB_WORKSPACE/tests/fixtures/fake-brew.sh" commit
+      # The shipped action.yml references `uses: $/setup-ruby`, which act cannot
+      # resolve, so act marks the composite step as failed even though main.rb
+      # runs to completion. Tolerate that outcome and verify the real effects.
+      - id: action
+        uses: .
+        continue-on-error: true
+      - name: Assert outcome and packages-removed is false
+        env:
+          ACTUAL: ${{ steps.action.outputs.packages-removed }}
+          OUTCOME: ${{ steps.action.outcome }}
+        run: |
+          echo "outcome: $OUTCOME"
+          echo "actual: $ACTUAL"
+          if [ "$OUTCOME" != "success" ] && [ "$OUTCOME" != "failure" ]; then
+            echo "FAIL: unexpected outcome '$OUTCOME'"; exit 1
+          fi
+          if [ "$ACTUAL" != "false" ]; then
+            echo "FAIL: expected 'false'"
+            exit 1
+          fi
+          echo "PASS"
+      - name: Assert tap untouched
+        run: |
+          for f in recent foreign; do
+            if [ ! -f "$TAP_DIRECTORY/Formula/$f.rb" ]; then
+              echo "FAIL: $f.rb should have been kept"; exit 1
+            fi
+          done
+          COUNT="$(git -C "$TAP_DIRECTORY" rev-list --count HEAD)"
+          echo "commits: $COUNT"
+          if [ "$COUNT" != "1" ]; then
+            echo "FAIL: expected no new commits"; exit 1
+          fi
+          echo "PASS"

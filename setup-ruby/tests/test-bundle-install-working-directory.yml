@@ -1,0 +1,36 @@
+name: Test bundle install in working-directory with Gemfile
+on:
+  workflow_dispatch:
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - name: Set up fake Homebrew and a Gemfile project
+        run: |
+          bash "$GITHUB_WORKSPACE/tests/fixtures/setup-fake-brew.sh" installed
+          mkdir -p "$GITHUB_WORKSPACE/ruby-project"
+          printf 'source "https://rubygems.org"\n' > "$GITHUB_WORKSPACE/ruby-project/Gemfile"
+      # act cannot parse the skipped setup-homebrew `uses:` step and fails the composite
+      # after all real steps ran; validate behaviour via outputs and calls.log instead.
+      - id: action
+        uses: .
+        continue-on-error: true
+        with:
+          working-directory: ruby-project
+      - name: Assert bundle check failed and bundle install ran
+        env:
+          OUTCOME: ${{ steps.action.outcome }}
+          RUBY_PATH: ${{ steps.action.outputs.ruby-path }}
+        run: |
+          echo "outcome: $OUTCOME"
+          echo "ruby-path: $RUBY_PATH"
+          cat /tmp/fakebrew/calls.log
+          case "$OUTCOME" in success|failure) ;; *) echo "FAIL: unexpected outcome"; exit 1 ;; esac
+          [ "$RUBY_PATH" = "/tmp/fakebrew/ruby/bin/ruby" ] || { echo "FAIL: ruby-path"; exit 1; }
+          grep -q '^bundle check' /tmp/fakebrew/calls.log || { echo "FAIL: bundle check not run"; exit 1; }
+          grep -q '^bundle install --jobs 4 --retry 3$' /tmp/fakebrew/calls.log || { echo "FAIL: bundle install not run"; exit 1; }
+          if grep -q '^bundle config' /tmp/fakebrew/calls.log; then
+            echo "FAIL: bundle config should not run without bundler-cache"; exit 1
+          fi
+          echo "PASS"

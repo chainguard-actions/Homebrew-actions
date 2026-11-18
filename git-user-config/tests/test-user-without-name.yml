@@ -1,0 +1,33 @@
+name: Test email/name fallback formatting for a known user
+on:
+  workflow_dispatch:
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - id: action
+        uses: .
+        with:
+          username: github-actions[bot]
+      - name: Assert outputs use login/noreply fallbacks
+        env:
+          NAME: ${{ steps.action.outputs.name }}
+          EMAIL: ${{ steps.action.outputs.email }}
+        run: |
+          echo "name: $NAME"
+          echo "email: $EMAIL"
+          if [ -z "$NAME" ]; then
+            echo "FAIL: name is empty"
+            exit 1
+          fi
+          if [ "$EMAIL" != "41898282+github-actions[bot]@users.noreply.github.com" ]; then
+            echo "FAIL: expected noreply email '41898282+github-actions[bot]@users.noreply.github.com'"
+            exit 1
+          fi
+          GIT_EMAIL="$(git config --global user.email)"
+          if [ "$GIT_EMAIL" != "$EMAIL" ]; then
+            echo "FAIL: git config email mismatch: $GIT_EMAIL"
+            exit 1
+          fi
+          echo "PASS"

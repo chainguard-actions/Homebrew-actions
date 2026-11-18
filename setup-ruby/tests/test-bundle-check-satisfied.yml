@@ -1,0 +1,36 @@
+name: Test bundle install skipped when bundle check passes
+on:
+  workflow_dispatch:
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - name: Set up fake Homebrew and a satisfied Gemfile project
+        run: |
+          bash "$GITHUB_WORKSPACE/tests/fixtures/setup-fake-brew.sh" installed
+          touch /tmp/fakebrew/bundle-check-ok
+          mkdir -p "$GITHUB_WORKSPACE/ruby-project"
+          printf 'source "https://rubygems.org"\n' > "$GITHUB_WORKSPACE/ruby-project/Gemfile"
+      # act cannot parse the skipped setup-homebrew `uses:` step and fails the composite
+      # after all real steps ran; validate behaviour via outputs and calls.log instead.
+      - id: action
+        uses: .
+        continue-on-error: true
+        with:
+          working-directory: ruby-project
+      - name: Assert bundle install was skipped
+        env:
+          OUTCOME: ${{ steps.action.outcome }}
+          RUBY_VERSION_OUT: ${{ steps.action.outputs.ruby-version }}
+        run: |
+          echo "outcome: $OUTCOME"
+          echo "ruby-version: $RUBY_VERSION_OUT"
+          cat /tmp/fakebrew/calls.log
+          case "$OUTCOME" in success|failure) ;; *) echo "FAIL: unexpected outcome"; exit 1 ;; esac
+          [ "$RUBY_VERSION_OUT" = "3.3.5" ] || { echo "FAIL: ruby-version"; exit 1; }
+          grep -q '^bundle check' /tmp/fakebrew/calls.log || { echo "FAIL: bundle check not run"; exit 1; }
+          if grep -q '^bundle install' /tmp/fakebrew/calls.log; then
+            echo "FAIL: bundle install should be skipped"; exit 1
+          fi
+          echo "PASS"

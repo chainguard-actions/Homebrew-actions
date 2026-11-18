@@ -1,0 +1,33 @@
+name: Test no Gemfile skips bundler
+on:
+  workflow_dispatch:
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - name: Set up fake Homebrew and an empty working directory
+        run: |
+          bash "$GITHUB_WORKSPACE/tests/fixtures/setup-fake-brew.sh" installed
+          mkdir -p "$GITHUB_WORKSPACE/empty-project"
+      # act cannot parse the skipped setup-homebrew `uses:` step and fails the composite
+      # after all real steps ran; validate behaviour via outputs and calls.log instead.
+      - id: action
+        uses: .
+        continue-on-error: true
+        with:
+          working-directory: empty-project
+      - name: Assert bundler was never invoked
+        env:
+          OUTCOME: ${{ steps.action.outcome }}
+          RUBY_VERSION_OUT: ${{ steps.action.outputs.ruby-version }}
+        run: |
+          echo "outcome: $OUTCOME"
+          echo "ruby-version: $RUBY_VERSION_OUT"
+          cat /tmp/fakebrew/calls.log
+          case "$OUTCOME" in success|failure) ;; *) echo "FAIL: unexpected outcome"; exit 1 ;; esac
+          [ "$RUBY_VERSION_OUT" = "3.3.5" ] || { echo "FAIL: ruby-version"; exit 1; }
+          if grep -q '^bundle' /tmp/fakebrew/calls.log; then
+            echo "FAIL: bundle should not run without a Gemfile"; exit 1
+          fi
+          echo "PASS"

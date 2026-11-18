@@ -1,0 +1,47 @@
+name: Test deprecated ssh input with RSA key
+on:
+  workflow_dispatch:
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - name: Prepare environment
+        id: prep
+        run: |
+          STUB="$GITHUB_WORKSPACE/../deprecate-master.sh"
+          if [ ! -e "$STUB" ]; then
+            printf '#!/bin/bash\nexit 0\n' > "$STUB" || printf '#!/bin/bash\nexit 0\n' | sudo tee "$STUB" >/dev/null
+            chmod +x "$STUB" 2>/dev/null || sudo chmod +x "$STUB"
+          fi
+          git config --global user.email "rsa@example.com"
+          git config --global user.name "RSA User"
+          rm -f /tmp/test_rsa_key /tmp/test_rsa_key.pub
+          ssh-keygen -q -t rsa -b 3072 -N "" -C "rsa" -f /tmp/test_rsa_key
+          {
+            echo "key<<EOF_KEY"
+            cat /tmp/test_rsa_key
+            echo "EOF_KEY"
+          } >> "$GITHUB_OUTPUT"
+      - id: action
+        uses: .
+        with:
+          signing_key: ${{ steps.prep.outputs.key }}
+          ssh: "true"
+      - name: Assert signing configured with RSA key
+        run: |
+          EXPECTED_PUB="$(cut -d' ' -f1,2 /tmp/test_rsa_key.pub)"
+          [ "$(git config --global gpg.format)" = "ssh" ] || { echo "FAIL: gpg.format"; exit 1; }
+          [ "$(git config --global commit.gpgsign)" = "true" ] || { echo "FAIL: commit.gpgsign"; exit 1; }
+          sk="$(git config --global user.signingkey)"; echo "user.signingkey: $sk"
+          case "$sk" in ssh-rsa\ *) ;; *) echo "FAIL: expected ssh-rsa signing key"; exit 1 ;; esac
+          [ "$(echo "$sk" | cut -d' ' -f1,2)" = "$EXPECTED_PUB" ] || { echo "FAIL: signingkey mismatch"; exit 1; }
+          grep -q "^rsa@example.com $EXPECTED_PUB" "$(git config --global gpg.ssh.allowedSignersFile)" || { echo "FAIL: allowed signer missing"; exit 1; }
+          rm -rf /tmp/signrepo-rsa
+          git init -q /tmp/signrepo-rsa
+          cd /tmp/signrepo-rsa
+          echo hi > a.txt
+          git add a.txt
+          git commit -q -m "rsa signed"
+          git verify-commit HEAD || { echo "FAIL: verify-commit"; exit 1; }
+          echo "PASS"

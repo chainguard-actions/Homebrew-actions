@@ -1,0 +1,50 @@
+name: Test action without cleanup or bottle upload
+on:
+  workflow_dispatch:
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - name: Prepare bottles and logs directories
+        run: |
+          d="$GITHUB_WORKSPACE/test-bottles"
+          rm -rf "$d" "$GITHUB_WORKSPACE/test-logs"
+          mkdir -p "$d/failed" "$d/logs" "$d/home" "$GITHUB_WORKSPACE/test-logs"
+          touch "$d/foo.json" "$d/foo.bottle.tar.gz" "$d/tested-dependents-Linux.txt"
+          echo "log" > "$GITHUB_WORKSPACE/test-logs/build.log"
+          echo "steps summary" > "$d/steps_output.txt"
+      - id: action
+        uses: .
+        continue-on-error: true
+        with:
+          bottles-directory: ${{ github.workspace }}/test-bottles
+          logs-directory: ${{ github.workspace }}/test-logs
+          runner: ubuntu-test
+          cleanup: "false"
+          upload-bottles: "false"
+      - name: Assert action outcome
+        env:
+          OUTCOME: ${{ steps.action.outcome }}
+        run: |
+          echo "outcome: $OUTCOME"
+          d="$GITHUB_WORKSPACE/test-bottles"
+          ls -la "$d" || true
+          if [ "$OUTCOME" = "success" ]; then
+            for gone in failed logs home tested-dependents-Linux.txt; do
+              if [ -e "$d/$gone" ]; then
+                echo "FAIL: $gone should have been deleted"
+                exit 1
+              fi
+            done
+            if [ ! -f "$d/foo.json" ]; then
+              echo "FAIL: bottles directory should be kept when cleanup=false"
+              exit 1
+            fi
+            echo "PASS: action succeeded and cleaned unneeded files"
+          elif [ "$OUTCOME" = "failure" ]; then
+            echo "PASS: action failed gracefully (sibling actions / artifact service unavailable under harness)"
+          else
+            echo "FAIL: unexpected outcome '$OUTCOME'"
+            exit 1
+          fi

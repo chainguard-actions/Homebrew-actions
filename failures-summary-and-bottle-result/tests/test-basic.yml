@@ -1,0 +1,54 @@
+name: Test basic usage
+on:
+  workflow_dispatch:
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - name: Create result file with ANSI colours
+        run: |
+          mkdir -p "$GITHUB_WORKSPACE/bottles"
+          printf '\033[1;31mBASIC_MARKER_LINE_ONE\033[0m\nBASIC_MARKER_LINE_TWO\n' > "$GITHUB_WORKSPACE/bottles/steps_output.txt"
+      - name: Start step-summary watcher (act truncates the summary file per step)
+        run: |
+          rm -f /tmp/summary-snapshot.md
+          SUMMARY_FILE="$GITHUB_STEP_SUMMARY"
+          export SUMMARY_FILE
+          setsid nohup bash -c '
+            while :; do
+              if grep -qF "### " "$SUMMARY_FILE" 2>/dev/null; then
+                cp "$SUMMARY_FILE" /tmp/summary-snapshot.tmp && mv /tmp/summary-snapshot.tmp /tmp/summary-snapshot.md
+              fi
+              sleep 0.01
+            done' > /dev/null 2>&1 < /dev/null &
+          echo $! > /tmp/summary-watcher.pid
+          sleep 0.2
+      - id: action
+        uses: .
+      - name: Assert result file removed
+        run: |
+          if [ -e "$GITHUB_WORKSPACE/bottles/steps_output.txt" ]; then
+            echo "FAIL: result file should have been removed"
+            exit 1
+          fi
+          echo "PASS"
+      - name: Assert step summary content
+        run: |
+          kill "$(cat /tmp/summary-watcher.pid)" 2>/dev/null || true
+          S=/tmp/summary-snapshot.md
+          echo "--- captured summary ---"
+          cat "$S" || { echo "FAIL: no summary captured"; exit 1; }
+          echo "------------------------"
+          grep -qF '### `brew test-bot` output' "$S" || { echo "FAIL: default heading missing"; exit 1; }
+          grep -qF 'BASIC_MARKER_LINE_ONE' "$S" || { echo "FAIL: line one missing"; exit 1; }
+          grep -qF 'BASIC_MARKER_LINE_TWO' "$S" || { echo "FAIL: line two missing"; exit 1; }
+          if grep -q $'\x1B' "$S"; then
+            echo "FAIL: ANSI escape codes not stripped"
+            exit 1
+          fi
+          if grep -qF '<details>' "$S"; then
+            echo "FAIL: output should not be collapsed by default"
+            exit 1
+          fi
+          echo "PASS"

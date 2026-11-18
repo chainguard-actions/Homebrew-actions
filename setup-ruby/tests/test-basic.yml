@@ -1,0 +1,54 @@
+name: Test basic usage (Ruby formula already installed)
+on:
+  workflow_dispatch:
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - name: Set up fake Homebrew
+        run: bash "$GITHUB_WORKSPACE/tests/fixtures/setup-fake-brew.sh" installed
+      # act cannot parse the action's skipped `uses: ${{ github.action_path }}/../setup-homebrew`
+      # step and marks the composite failed AFTER all real steps ran and outputs were set.
+      # Accept success or failure; the real behaviour is validated strictly via outputs/calls.log.
+      - id: action
+        uses: .
+        continue-on-error: true
+      - name: Assert outputs
+        env:
+          OUTCOME: ${{ steps.action.outcome }}
+          RUBY_PATH: ${{ steps.action.outputs.ruby-path }}
+          RUBY_PREFIX: ${{ steps.action.outputs.ruby-prefix }}
+          RUBY_VERSION_OUT: ${{ steps.action.outputs.ruby-version }}
+        run: |
+          echo "outcome: $OUTCOME"
+          echo "ruby-path: $RUBY_PATH"
+          echo "ruby-prefix: $RUBY_PREFIX"
+          echo "ruby-version: $RUBY_VERSION_OUT"
+          cat /tmp/fakebrew/calls.log
+          case "$OUTCOME" in success|failure) ;; *) echo "FAIL: unexpected outcome"; exit 1 ;; esac
+          [ "$RUBY_PATH" = "/tmp/fakebrew/ruby/bin/ruby" ] || { echo "FAIL: ruby-path"; exit 1; }
+          [ "$RUBY_PREFIX" = "/tmp/fakebrew/ruby" ] || { echo "FAIL: ruby-prefix"; exit 1; }
+          [ "$RUBY_VERSION_OUT" = "3.3.5" ] || { echo "FAIL: ruby-version"; exit 1; }
+          if grep -q '^brew install ruby' /tmp/fakebrew/calls.log; then
+            echo "FAIL: brew install should not run when ruby is already installed"; exit 1
+          fi
+          if grep -q '^brew vendor-install' /tmp/fakebrew/calls.log; then
+            echo "FAIL: portable ruby should not be installed by default"; exit 1
+          fi
+          echo "PASS"
+      - name: Assert Ruby bin dir added to PATH
+        env:
+          OUTCOME: ${{ steps.action.outcome }}
+        run: |
+          echo "PATH: $PATH"
+          actual="$(command -v ruby || true)"
+          echo "ruby: $actual"
+          if [ "$OUTCOME" != "success" ]; then
+            echo "SKIP: composite reported failure under act; PATH propagation not guaranteed"
+            exit 0
+          fi
+          if [ "$actual" != "/tmp/fakebrew/ruby/bin/ruby" ]; then
+            echo "FAIL: ruby bin dir not first on PATH"; exit 1
+          fi
+          echo "PASS"

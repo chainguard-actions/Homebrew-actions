@@ -1,0 +1,62 @@
+name: Test force push without lease
+on:
+  workflow_dispatch:
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - name: Set up diverged local repo and bare remote
+        run: |
+          set -e
+          rm -rf /tmp/gtp-force
+          mkdir -p /tmp/gtp-force
+          cd /tmp/gtp-force
+          git init --bare -b main remote.git
+          git init -b main local
+          cd local
+          git config user.email "test@example.com"
+          git config user.name "Test User"
+          echo one > file.txt
+          git add file.txt
+          git commit -m "first"
+          git remote add origin /tmp/gtp-force/remote.git
+          git push origin main
+          git clone -b main /tmp/gtp-force/remote.git /tmp/gtp-force/other
+          cd /tmp/gtp-force/other
+          git config user.email "other@example.com"
+          git config user.name "Other User"
+          echo other > other.txt
+          git add other.txt
+          git commit -m "other"
+          git push origin main
+          git rev-parse HEAD > /tmp/gtp-force/other-sha
+          cd /tmp/gtp-force/local
+          echo local > local.txt
+          git add local.txt
+          git commit -m "local"
+          git rev-parse HEAD > /tmp/gtp-force/expected
+      - id: action
+        uses: .
+        with:
+          directory: /tmp/gtp-force/local
+          tries: "2"
+          force: "true"
+          no_lease: "true"
+      - name: Assert remote was force-overwritten with local commit
+        run: |
+          R=/tmp/gtp-force/remote.git
+          EXPECTED="$(cat /tmp/gtp-force/expected)"
+          OTHER="$(cat /tmp/gtp-force/other-sha)"
+          ACTUAL="$(git --git-dir=$R rev-parse main)"
+          echo "expected: $EXPECTED"
+          echo "actual: $ACTUAL"
+          if [ "$EXPECTED" != "$ACTUAL" ]; then
+            echo "FAIL: remote main should equal the local (un-rebased) commit"
+            exit 1
+          fi
+          if git --git-dir=$R merge-base --is-ancestor "$OTHER" main; then
+            echo "FAIL: other commit should have been discarded by force push"
+            exit 1
+          fi
+          echo "PASS"

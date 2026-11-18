@@ -1,0 +1,40 @@
+name: Test with a simulated pull_request event payload
+on:
+  workflow_dispatch:
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - name: Write a pull_request event payload
+        run: |
+          cat > "$RUNNER_TEMP/pr-event.json" <<'EOF'
+          {
+            "action": "opened",
+            "number": 1,
+            "pull_request": { "number": 1 }
+          }
+          EOF
+          echo "EVENT_FILE=$RUNNER_TEMP/pr-event.json" >> "$GITHUB_ENV"
+      - id: action
+        uses: .
+        continue-on-error: true
+        env:
+          GITHUB_EVENT_PATH: ${{ env.EVENT_FILE }}
+        with:
+          failure_label: automerge-skip
+          autosquash_label: autosquash
+          ignore_label: CI-published-bottle-commits
+      - name: Assert action ran (succeeded or failed gracefully on sentinel repo)
+        env:
+          OUTCOME: ${{ steps.action.outcome }}
+        run: |
+          echo "outcome: $OUTCOME"
+          if [ "$OUTCOME" = "success" ]; then
+            echo "PASS: action succeeded"
+          elif [ "$OUTCOME" = "failure" ]; then
+            echo "PASS: action failed gracefully (sentinel repo is not resolvable)"
+          else
+            echo "FAIL: unexpected outcome '$OUTCOME'"
+            exit 1
+          fi

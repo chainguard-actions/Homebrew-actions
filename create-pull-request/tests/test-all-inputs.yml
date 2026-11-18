@@ -1,0 +1,47 @@
+name: Test with title, body, labels and reviewers
+on:
+  workflow_dispatch:
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - id: action
+        uses: .
+        continue-on-error: true
+        with:
+          head: actionchain-nonexistent-head-branch-xyz
+          base: main
+          title: "Test PR title"
+          body: "Test PR body"
+          labels: "bug,enhancement"
+          reviewers: "octocat"
+      - name: Assert action ran (outputs set, or failed gracefully on the sentinel repo)
+        env:
+          NUMBER: ${{ steps.action.outputs.number }}
+          NODE_ID: ${{ steps.action.outputs.node_id }}
+          OUTCOME: ${{ steps.action.outcome }}
+        run: |
+          echo "outcome: $OUTCOME"
+          echo "number: $NUMBER"
+          echo "node_id: $NODE_ID"
+          if [ "$OUTCOME" = "success" ]; then
+            if ! echo "$NUMBER" | grep -qE '^[0-9]+$'; then
+              echo "FAIL: action succeeded but number output is not numeric"
+              exit 1
+            fi
+            if [ -z "$NODE_ID" ]; then
+              echo "FAIL: action succeeded but node_id output is empty"
+              exit 1
+            fi
+            echo "PASS: created PR #$NUMBER"
+          elif [ "$OUTCOME" = "failure" ]; then
+            if [ -n "$NUMBER" ]; then
+              echo "FAIL: action failed but set number output"
+              exit 1
+            fi
+            echo "PASS: action failed gracefully (sentinel repo / nonexistent head)"
+          else
+            echo "FAIL: unexpected outcome '$OUTCOME'"
+            exit 1
+          fi

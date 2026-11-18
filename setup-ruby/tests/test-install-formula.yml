@@ -1,0 +1,35 @@
+name: Test Ruby formula is installed when missing
+on:
+  workflow_dispatch:
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - name: Set up fake Homebrew (no Ruby formula)
+        run: bash "$GITHUB_WORKSPACE/tests/fixtures/setup-fake-brew.sh" missing
+      # act cannot parse the skipped setup-homebrew `uses:` step and fails the composite
+      # after all real steps ran; validate behaviour via outputs and calls.log instead.
+      - id: action
+        uses: .
+        continue-on-error: true
+        with:
+          portable-ruby: "false"
+      - name: Assert brew install ruby ran and outputs set
+        env:
+          OUTCOME: ${{ steps.action.outcome }}
+          RUBY_PATH: ${{ steps.action.outputs.ruby-path }}
+          RUBY_PREFIX: ${{ steps.action.outputs.ruby-prefix }}
+          RUBY_VERSION_OUT: ${{ steps.action.outputs.ruby-version }}
+        run: |
+          echo "outcome: $OUTCOME"
+          echo "ruby-path: $RUBY_PATH"
+          echo "ruby-prefix: $RUBY_PREFIX"
+          echo "ruby-version: $RUBY_VERSION_OUT"
+          cat /tmp/fakebrew/calls.log
+          case "$OUTCOME" in success|failure) ;; *) echo "FAIL: unexpected outcome"; exit 1 ;; esac
+          grep -q '^brew install ruby$' /tmp/fakebrew/calls.log || { echo "FAIL: brew install ruby not called"; exit 1; }
+          [ "$RUBY_PATH" = "/tmp/fakebrew/ruby/bin/ruby" ] || { echo "FAIL: ruby-path"; exit 1; }
+          [ "$RUBY_PREFIX" = "/tmp/fakebrew/ruby" ] || { echo "FAIL: ruby-prefix"; exit 1; }
+          [ "$RUBY_VERSION_OUT" = "3.3.5" ] || { echo "FAIL: ruby-version"; exit 1; }
+          echo "PASS"

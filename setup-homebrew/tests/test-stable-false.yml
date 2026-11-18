@@ -1,0 +1,39 @@
+name: Test stable false (track main branch)
+on:
+  workflow_dispatch:
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - id: action
+        uses: .
+        with:
+          stable: "false"
+      - name: Assert gems-hash output
+        shell: bash
+        env:
+          GEMS_HASH: ${{ steps.action.outputs.gems-hash }}
+        run: |
+          echo "gems-hash: $GEMS_HASH"
+          if ! [[ "$GEMS_HASH" =~ ^[0-9a-f]{64}$ ]]; then
+            echo "FAIL: gems-hash is not a sha256"
+            exit 1
+          fi
+          echo "PASS"
+      - name: Assert brew repo on main and no update-to-tag
+        shell: bash
+        run: |
+          export PATH="/home/linuxbrew/.linuxbrew/bin:/opt/homebrew/bin:/usr/local/bin:$PATH"
+          echo "HOMEBREW_UPDATE_TO_TAG='${HOMEBREW_UPDATE_TO_TAG:-}'"
+          if [ -n "${HOMEBREW_UPDATE_TO_TAG:-}" ]; then
+            echo "FAIL: HOMEBREW_UPDATE_TO_TAG should not be set when stable=false"
+            exit 1
+          fi
+          branch="$(git -C "$(brew --repo)" symbolic-ref --short HEAD)"
+          echo "brew repo branch: $branch"
+          if [ "$branch" != "main" ]; then
+            echo "FAIL: expected brew repo on 'main' branch"
+            exit 1
+          fi
+          echo "PASS"

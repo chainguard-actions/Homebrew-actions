@@ -1,0 +1,32 @@
+name: Test debug output enabled
+on:
+  workflow_dispatch:
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - id: action
+        uses: .
+        with:
+          debug: "true"
+      - name: Assert debug env vars exported
+        shell: bash
+        run: |
+          echo "HOMEBREW_DEBUG='${HOMEBREW_DEBUG:-}' HOMEBREW_VERBOSE='${HOMEBREW_VERBOSE:-}'"
+          if [ "${HOMEBREW_DEBUG:-}" != "1" ] || [ "${HOMEBREW_VERBOSE:-}" != "1" ]; then
+            echo "FAIL: expected HOMEBREW_DEBUG=1 and HOMEBREW_VERBOSE=1"
+            exit 1
+          fi
+          echo "PASS"
+      - name: Assert gems-path output
+        shell: bash
+        env:
+          GEMS_PATH: ${{ steps.action.outputs.gems-path }}
+        run: |
+          echo "gems-path: $GEMS_PATH"
+          if [ -z "$GEMS_PATH" ]; then
+            echo "FAIL: gems-path empty"
+            exit 1
+          fi
+          echo "PASS"

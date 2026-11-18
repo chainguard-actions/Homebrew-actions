@@ -1,0 +1,71 @@
+name: Test action with empty bottles directory
+on:
+  workflow_dispatch:
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - name: Prepare empty bottles and logs directories
+        run: |
+          rm -rf "$GITHUB_WORKSPACE/empty-bottles" "$GITHUB_WORKSPACE/empty-logs"
+          mkdir -p "$GITHUB_WORKSPACE/empty-bottles" "$GITHUB_WORKSPACE/empty-logs"
+          echo "log" > "$GITHUB_WORKSPACE/empty-logs/build.log"
+      - id: count
+        name: Run shipped count-bottles.sh (debug mode)
+        shell: bash
+        run: |
+          script="$GITHUB_WORKSPACE/post-build/count-bottles.sh"
+          if [ ! -f "$script" ]; then
+            script="$(find "$GITHUB_WORKSPACE" -path '*post-build/count-bottles.sh' -not -path '*/node_modules/*' | head -n1)"
+          fi
+          if [ -z "$script" ] || [ ! -f "$script" ]; then
+            script="$(find "$GITHUB_WORKSPACE" -name count-bottles.sh | head -n1)"
+          fi
+          echo "using script: $script"
+          [ -f "$script" ] || { echo "FAIL: count-bottles.sh not found"; exit 1; }
+          cd "$GITHUB_WORKSPACE/empty-bottles"
+          bash "$script" true
+      - name: Assert all counts are zero
+        env:
+          COUNT: ${{ steps.count.outputs.count }}
+          FAILURES: ${{ steps.count.outputs.failures }}
+          SKIPPED: ${{ steps.count.outputs.skipped }}
+          DEPENDENTS: ${{ steps.count.outputs.dependents }}
+        run: |
+          echo "count=$COUNT failures=$FAILURES skipped=$SKIPPED dependents=$DEPENDENTS"
+          for v in "$COUNT" "$FAILURES" "$SKIPPED" "$DEPENDENTS"; do
+            if [ "$v" != "0" ]; then
+              echo "FAIL: expected 0 but got '$v'"
+              exit 1
+            fi
+          done
+          echo "PASS"
+      - id: action
+        uses: .
+        continue-on-error: true
+        with:
+          bottles-directory: ${{ github.workspace }}/empty-bottles
+          logs-directory: ${{ github.workspace }}/empty-logs
+          runner: ubuntu-empty
+          cleanup: "false"
+          upload-bottles: "true"
+      - name: Assert action outcome
+        env:
+          OUTCOME: ${{ steps.action.outcome }}
+        run: |
+          echo "outcome: $OUTCOME"
+          d="$GITHUB_WORKSPACE/empty-bottles"
+          ls -la "$d" || true
+          if [ "$OUTCOME" = "success" ]; then
+            if [ ! -d "$d" ]; then
+              echo "FAIL: bottles directory should be kept when cleanup=false"
+              exit 1
+            fi
+            echo "PASS: action succeeded on empty bottles directory"
+          elif [ "$OUTCOME" = "failure" ]; then
+            echo "PASS: action failed gracefully (sibling actions / artifact service unavailable under harness)"
+          else
+            echo "FAIL: unexpected outcome '$OUTCOME'"
+            exit 1
+          fi

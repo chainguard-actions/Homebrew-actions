@@ -1,0 +1,59 @@
+name: Test removes cask disabled over a year ago
+on:
+  workflow_dispatch:
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - name: Set up fake brew, ruby and tap
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: bash "$GITHUB_WORKSPACE/tests/fixtures/fake-brew.sh" init
+      - name: Create tap fixtures
+        run: |
+          mkdir -p "$TAP_DIRECTORY/Casks"
+          echo "# old-cask" > "$TAP_DIRECTORY/Casks/old-cask.rb"
+          cat > "$CASK_JSON" <<EOF
+          {"casks":[
+            {"token":"old-cask","tap":"$TAP_NAME","disabled":true,"disable_date":"$OLD_DATE","ruby_source_path":"Casks/old-cask.rb"}
+          ]}
+          EOF
+          cat "$CASK_JSON"
+          bash "$GITHUB_WORKSPACE/tests/fixtures/fake-brew.sh" commit
+      # The shipped action.yml references `uses: $/setup-ruby`, which act cannot
+      # resolve, so act marks the composite step as failed even though main.rb
+      # runs to completion. Tolerate that outcome and verify the real effects.
+      - id: action
+        uses: .
+        continue-on-error: true
+      - name: Assert outcome and packages-removed is true
+        env:
+          ACTUAL: ${{ steps.action.outputs.packages-removed }}
+          OUTCOME: ${{ steps.action.outcome }}
+        run: |
+          echo "outcome: $OUTCOME"
+          echo "actual: $ACTUAL"
+          if [ "$OUTCOME" != "success" ] && [ "$OUTCOME" != "failure" ]; then
+            echo "FAIL: unexpected outcome '$OUTCOME'"; exit 1
+          fi
+          if [ "$ACTUAL" != "true" ]; then
+            echo "FAIL: expected 'true'"
+            exit 1
+          fi
+          echo "PASS"
+      - name: Assert cask removed and committed
+        run: |
+          cat "$BREW_LOG"
+          if [ -e "$TAP_DIRECTORY/Casks/old-cask.rb" ]; then
+            echo "FAIL: old-cask.rb should have been removed"; exit 1
+          fi
+          SUBJECT="$(git -C "$TAP_DIRECTORY" log -1 --format=%s)"
+          echo "latest commit: $SUBJECT"
+          if [ "$SUBJECT" != "old-cask: remove cask" ]; then
+            echo "FAIL: expected 'old-cask: remove cask'"; exit 1
+          fi
+          if grep -q -- "--formula" "$BREW_LOG"; then
+            echo "FAIL: formulae should not be queried without a Formula directory"; exit 1
+          fi
+          echo "PASS"

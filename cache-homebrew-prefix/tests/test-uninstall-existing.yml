@@ -1,0 +1,37 @@
+name: Test uninstall existing formulae
+on:
+  workflow_dispatch:
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - name: Set up fake Homebrew with pre-installed formulae
+        run: |
+          bash "$GITHUB_WORKSPACE/tests/fixtures/setup-fake-brew.sh"
+          printf 'oldformula\n' > /tmp/fakebrew/installed
+      - id: action
+        uses: .
+        with:
+          install: jq
+          uninstall: "true"
+      - name: Assert cleanup ran and install happened
+        env:
+          KEY: ${{ steps.action.outputs.cache-key }}
+        run: |
+          cat /tmp/fakebrew/calls.log
+          if ! grep -qx 'test-bot --only-cleanup-before' /tmp/fakebrew/calls.log; then
+            echo "FAIL: brew test-bot cleanup not called"
+            exit 1
+          fi
+          if [ -f /tmp/fakebrew/installed ]; then
+            echo "FAIL: formulae not cleaned up"
+            exit 1
+          fi
+          if ! grep -qx 'install --formula jq' /tmp/fakebrew/calls.log; then
+            echo "FAIL: install not called"
+            exit 1
+          fi
+          echo "key: $KEY"
+          [ "$KEY" = "fakehash-jq" ] || { echo "FAIL: bad cache-key"; exit 1; }
+          echo "PASS"

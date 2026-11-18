@@ -1,0 +1,29 @@
+name: Test portable-ruby accepts case-insensitive "YES"
+on:
+  workflow_dispatch:
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - name: Set up fake Homebrew
+        run: bash "$GITHUB_WORKSPACE/tests/fixtures/setup-fake-brew.sh" installed
+      # act cannot parse the skipped setup-homebrew `uses:` step and fails the composite
+      # after all real steps ran; validate behaviour via outputs and calls.log instead.
+      - id: action
+        uses: .
+        continue-on-error: true
+        with:
+          portable-ruby: "YES"
+      - name: Assert portable Ruby was selected
+        env:
+          OUTCOME: ${{ steps.action.outcome }}
+          RUBY_PATH: ${{ steps.action.outputs.ruby-path }}
+        run: |
+          echo "outcome: $OUTCOME"
+          echo "ruby-path: $RUBY_PATH"
+          cat /tmp/fakebrew/calls.log
+          case "$OUTCOME" in success|failure) ;; *) echo "FAIL: unexpected outcome"; exit 1 ;; esac
+          grep -q '^brew vendor-install ruby$' /tmp/fakebrew/calls.log || { echo "FAIL: vendor-install not called"; exit 1; }
+          [ "$RUBY_PATH" = "/tmp/fakebrew/repo/Library/Homebrew/vendor/portable-ruby/current/bin/ruby" ] || { echo "FAIL: ruby-path"; exit 1; }
+          echo "PASS"

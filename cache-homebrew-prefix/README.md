@@ -1,0 +1,63 @@
+# Cache Homebrew Prefix
+
+A composite action that caches the Homebrew prefix, installs formulae via
+`brew install --formula`, and keys the cache from the formula list.
+
+## Usage
+
+```yaml
+- name: Cache Homebrew prefix
+  uses: Homebrew/actions/cache-homebrew-prefix@1f8e202ffddf94def7f42f6fa3a482e821489f9c # 2026.07.10.1
+  with:
+    install: wget jq
+    uninstall: true
+    workflow-key: actionlint
+```
+
+```yaml
+- name: Cache Homebrew prefix from Brewfile
+  uses: Homebrew/actions/cache-homebrew-prefix@1f8e202ffddf94def7f42f6fa3a482e821489f9c # 2026.07.10.1
+  with:
+    brewfile: true
+    uninstall: true
+```
+
+## Inputs
+
+- `install` (optional): Formula names passed to `brew install --formula`.
+  Tokens are split on whitespace and must match `^[A-Za-z0-9._/@-]+$`.
+- `workflow-key` (optional): Stable namespace appended to the cache prefix so
+  multiple workflows in the same repository can keep separate caches. For
+  example, set `workflow-key: ${{ github.workflow }}` or a custom value like
+  `actionlint`. Characters outside `[A-Za-z0-9._-]` are normalized to `-`.
+- `brewfile` (optional): Install formulae from `./Brewfile` instead of
+  `install`. Runs `brew bundle check --file Brewfile` first and only runs
+  `brew bundle --file Brewfile --no-upgrade` if dependencies are missing.
+  Default: `false`.
+- `uninstall` (optional): When `true`, existing formulae are automatically
+  removed before install. Default: `false`.
+- Validation: Either `install` or `brewfile` must be provided (but not both).
+
+## Outputs
+
+- `prefix`: Homebrew prefix path used for caching.
+- `cache-prefix`: The computed cache prefix, including OS, architecture, and
+  any `workflow-key`.
+- `cache-key`: The computed cache key hash.
+
+## Notes
+
+- The action only checks existing formulae (not casks).
+- If formulae are already installed and `uninstall` is `false`, the action
+  fails early.
+- If `uninstall` is `true`, existing formulae are cleaned up with
+  `brew test-bot --only-cleanup-before` before install.
+- `brewfile` and `install` are mutually exclusive.
+- Cache keys are based on `brew list --formula --versions` and are scoped by
+  OS version, architecture, and optional `workflow-key`.
+- The action restores the newest matching cache for the computed prefix, then
+  only saves when the final exact cache key does not already exist.
+
+## Privacy
+
+This Action contacts Chainguard's licensing server to verify authorization. Connection metadata (IP address, GitHub repository identifier, timestamp, and any metadata encoded in the auth token) is transmitted to Chainguard, Inc. even if authorization is denied in accordance with our [Privacy Notice](https://www.chainguard.dev/legal/privacy-notice)

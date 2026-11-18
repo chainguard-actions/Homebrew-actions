@@ -1,0 +1,20 @@
+{
+  "name": "homebrew-actions",
+  "scripts": {
+    "test": "node --test --experimental-test-module-mocks --import ./spec-helper.mts --test-reporter ./test-reporter.mts --test-reporter-destination stdout"
+  },
+  "dependencies": {
+    "@actions/core": "^3.0.1",
+    "@actions/exec": "^3.0.0",
+    "@actions/github": "^9.1.1",
+    "@octokit/graphql-schema": "^15.26.1",
+    "js-yaml": "^5.4.3"
+  },
+  "devDependencies": {
+    "@tsconfig/node-ts": "^23.6.4",
+    "@tsconfig/node24": "^24.0.5",
+    "@types/js-yaml": "^4.0.9",
+    "@types/node": "^24.19.1",
+    "typescript": "^7.0.2"
+  }
+}

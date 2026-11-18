@@ -1,0 +1,58 @@
+name: Test token configures auth header
+on:
+  workflow_dispatch:
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - name: Set up local repo and bare remote
+        run: |
+          set -e
+          rm -rf /tmp/gtp-token
+          mkdir -p /tmp/gtp-token
+          cd /tmp/gtp-token
+          git init --bare -b main remote.git
+          git init -b main local
+          cd local
+          git config user.email "test@example.com"
+          git config user.name "Test User"
+          echo one > file.txt
+          git add file.txt
+          git commit -m "first"
+          git remote add origin /tmp/gtp-token/remote.git
+      - id: action
+        uses: .
+        with:
+          directory: /tmp/gtp-token/local
+          token: ${{ github.token }}
+          tries: "2"
+      - name: Assert extraheader configured and push succeeded
+        env:
+          TOKEN: ${{ github.token }}
+        run: |
+          set -e
+          cd /tmp/gtp-token/local
+          HDR="$(git config --local --get http.https://github.com/.extraheader || true)"
+          if [ -z "$HDR" ]; then
+            echo "FAIL: extraheader not configured"
+            exit 1
+          fi
+          case "$HDR" in
+            "AUTHORIZATION: basic "*) ;;
+            *) echo "FAIL: unexpected header format"; exit 1 ;;
+          esac
+          ENC="${HDR#AUTHORIZATION: basic }"
+          EXPECTED="$(printf 'x-access-token:%s' "$TOKEN" | base64 -w0)"
+          if [ "$ENC" != "$EXPECTED" ]; then
+            echo "FAIL: header credentials do not match token"
+            exit 1
+          fi
+          LOCAL="$(git rev-parse main)"
+          REMOTE="$(git --git-dir=/tmp/gtp-token/remote.git rev-parse main)"
+          echo "local=$LOCAL remote=$REMOTE"
+          if [ "$LOCAL" != "$REMOTE" ]; then
+            echo "FAIL: push did not happen"
+            exit 1
+          fi
+          echo "PASS"

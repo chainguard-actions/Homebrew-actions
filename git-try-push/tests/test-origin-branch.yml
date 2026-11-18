@@ -1,0 +1,75 @@
+name: Test origin_branch rebase source
+on:
+  workflow_dispatch:
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - name: Set up repos (dest diverged, upstream ahead of dest)
+        run: |
+          set -e
+          rm -rf /tmp/gtp-ob
+          mkdir -p /tmp/gtp-ob
+          cd /tmp/gtp-ob
+          git init --bare -b main remote.git
+          git init -b main local
+          cd local
+          git config user.email "test@example.com"
+          git config user.name "Test User"
+          echo one > file.txt
+          git add file.txt
+          git commit -m "first"
+          git remote add origin /tmp/gtp-ob/remote.git
+          git push origin main
+          # Other clone: create dest (X) and upstream (X + U)
+          git clone -b main /tmp/gtp-ob/remote.git /tmp/gtp-ob/other
+          cd /tmp/gtp-ob/other
+          git config user.email "other@example.com"
+          git config user.name "Other User"
+          echo x > x.txt
+          git add x.txt
+          git commit -m "dest-commit"
+          git push origin HEAD:refs/heads/dest
+          echo u > u.txt
+          git add u.txt
+          git commit -m "upstream-commit"
+          git push origin HEAD:refs/heads/upstream
+          git rev-parse HEAD > /tmp/gtp-ob/upstream-sha
+          # Local makes its own commit on main (diverged from dest)
+          cd /tmp/gtp-ob/local
+          echo local > local.txt
+          git add local.txt
+          git commit -m "local"
+      - id: action
+        uses: .
+        with:
+          directory: /tmp/gtp-ob/local
+          branch: main
+          remote_branch: dest
+          origin_branch: upstream
+          tries: "3"
+      - name: Assert dest was rebased onto upstream and pushed
+        run: |
+          set -e
+          R=/tmp/gtp-ob/remote.git
+          UP="$(cat /tmp/gtp-ob/upstream-sha)"
+          echo "remote dest log:"
+          git --git-dir=$R log --oneline dest
+          if ! git --git-dir=$R merge-base --is-ancestor "$UP" dest; then
+            echo "FAIL: upstream commit not in remote dest (origin_branch not used for rebase)"
+            exit 1
+          fi
+          SUBJECT="$(git --git-dir=$R log -1 --format=%s dest)"
+          echo "tip subject: $SUBJECT"
+          if [ "$SUBJECT" != "local" ]; then
+            echo "FAIL: expected local commit at dest tip"
+            exit 1
+          fi
+          LOCAL="$(git -C /tmp/gtp-ob/local rev-parse main)"
+          REMOTE="$(git --git-dir=$R rev-parse dest)"
+          if [ "$LOCAL" != "$REMOTE" ]; then
+            echo "FAIL: local main ($LOCAL) != remote dest ($REMOTE)"
+            exit 1
+          fi
+          echo "PASS"

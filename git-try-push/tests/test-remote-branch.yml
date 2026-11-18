@@ -1,0 +1,63 @@
+name: Test remote_branch
+on:
+  workflow_dispatch:
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - name: Set up local repo and bare remote
+        run: |
+          set -e
+          rm -rf /tmp/gtp-rb
+          mkdir -p /tmp/gtp-rb
+          cd /tmp/gtp-rb
+          git init --bare -b main remote.git
+          git init -b main local
+          cd local
+          git config user.email "test@example.com"
+          git config user.name "Test User"
+          echo one > file.txt
+          git add file.txt
+          git commit -m "first"
+          git remote add origin /tmp/gtp-rb/remote.git
+          git push origin main
+          git checkout -b feature
+          echo feature > feature.txt
+          git add feature.txt
+          git commit -m "feature"
+          git rev-parse HEAD > /tmp/gtp-rb/expected
+          git checkout main
+      - id: action
+        uses: .
+        with:
+          directory: /tmp/gtp-rb/local
+          branch: feature
+          remote_branch: published
+          tries: "2"
+      - name: Assert remote branch created and main untouched
+        run: |
+          EXPECTED="$(cat /tmp/gtp-rb/expected)"
+          ACTUAL="$(git --git-dir=/tmp/gtp-rb/remote.git rev-parse published)"
+          echo "expected: $EXPECTED"
+          echo "actual: $ACTUAL"
+          if [ "$EXPECTED" != "$ACTUAL" ]; then
+            echo "FAIL: remote 'published' does not match feature commit"
+            exit 1
+          fi
+          MAIN="$(git --git-dir=/tmp/gtp-rb/remote.git rev-parse main)"
+          if [ "$MAIN" = "$EXPECTED" ]; then
+            echo "FAIL: remote main should not have been updated"
+            exit 1
+          fi
+          if git --git-dir=/tmp/gtp-rb/remote.git rev-parse --verify -q refs/heads/feature; then
+            echo "FAIL: remote should not have a 'feature' branch"
+            exit 1
+          fi
+          CUR="$(git -C /tmp/gtp-rb/local rev-parse --abbrev-ref HEAD)"
+          echo "current local branch: $CUR"
+          if [ "$CUR" != "main" ]; then
+            echo "FAIL: expected action to check out previous branch 'main'"
+            exit 1
+          fi
+          echo "PASS"

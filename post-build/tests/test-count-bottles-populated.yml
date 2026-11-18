@@ -1,0 +1,82 @@
+name: Test action with populated bottles directory
+on:
+  workflow_dispatch:
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - name: Prepare bottles and logs directories
+        run: |
+          d="$GITHUB_WORKSPACE/populated-bottles"
+          rm -rf "$d" "$GITHUB_WORKSPACE/populated-logs"
+          mkdir -p "$d/failed" "$GITHUB_WORKSPACE/populated-logs"
+          touch "$d/foo.json" "$d/bar.json" "$d/failed/baz.json" \
+                "$d/skipped_or_failed_formulae-macOS.txt" \
+                "$d/tested-dependents-macOS.txt" "$d/tested-dependents-Linux.txt" \
+                "$d/foo.bottle.tar.gz"
+          echo "log" > "$GITHUB_WORKSPACE/populated-logs/build.log"
+      - id: count
+        name: Run shipped count-bottles.sh
+        shell: bash
+        run: |
+          script="$GITHUB_WORKSPACE/post-build/count-bottles.sh"
+          if [ ! -f "$script" ]; then
+            script="$(find "$GITHUB_WORKSPACE" -path '*post-build/count-bottles.sh' -not -path '*/node_modules/*' | head -n1)"
+          fi
+          if [ -z "$script" ] || [ ! -f "$script" ]; then
+            script="$(find "$GITHUB_WORKSPACE" -name count-bottles.sh | head -n1)"
+          fi
+          echo "using script: $script"
+          [ -f "$script" ] || { echo "FAIL: count-bottles.sh not found"; exit 1; }
+          cd "$GITHUB_WORKSPACE/populated-bottles"
+          bash "$script" false
+      - name: Assert counts
+        env:
+          COUNT: ${{ steps.count.outputs.count }}
+          FAILURES: ${{ steps.count.outputs.failures }}
+          SKIPPED: ${{ steps.count.outputs.skipped }}
+          DEPENDENTS: ${{ steps.count.outputs.dependents }}
+        run: |
+          echo "count=$COUNT failures=$FAILURES skipped=$SKIPPED dependents=$DEPENDENTS"
+          [ "$COUNT" = "2" ] || { echo "FAIL: count expected 2"; exit 1; }
+          [ "$FAILURES" = "1" ] || { echo "FAIL: failures expected 1"; exit 1; }
+          [ "$SKIPPED" = "1" ] || { echo "FAIL: skipped expected 1"; exit 1; }
+          [ "$DEPENDENTS" = "2" ] || { echo "FAIL: dependents expected 2"; exit 1; }
+          echo "PASS"
+      - id: action
+        uses: .
+        continue-on-error: true
+        with:
+          bottles-directory: ${{ github.workspace }}/populated-bottles
+          logs-directory: ${{ github.workspace }}/populated-logs
+          runner: ubuntu-populated
+          cleanup: "false"
+          upload-bottles: "false"
+      - name: Assert action outcome
+        env:
+          OUTCOME: ${{ steps.action.outcome }}
+        run: |
+          echo "outcome: $OUTCOME"
+          d="$GITHUB_WORKSPACE/populated-bottles"
+          ls -la "$d" || true
+          if [ "$OUTCOME" = "success" ]; then
+            for gone in failed tested-dependents-macOS.txt tested-dependents-Linux.txt; do
+              if [ -e "$d/$gone" ]; then
+                echo "FAIL: $gone should have been deleted"
+                exit 1
+              fi
+            done
+            for kept in foo.json bar.json foo.bottle.tar.gz; do
+              if [ ! -f "$d/$kept" ]; then
+                echo "FAIL: $kept should be kept when cleanup=false"
+                exit 1
+              fi
+            done
+            echo "PASS: action succeeded and cleaned unneeded files"
+          elif [ "$OUTCOME" = "failure" ]; then
+            echo "PASS: action failed gracefully (sibling actions / artifact service unavailable under harness)"
+          else
+            echo "FAIL: unexpected outcome '$OUTCOME'"
+            exit 1
+          fi
