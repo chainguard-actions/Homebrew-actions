@@ -73,7 +73,7 @@ runs:
 
     - name: Cache Homebrew Bundler RubyGems
       id: cache
-      uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      uses: chainguard-actions/actions-cache/restore@46c2783c2418d3de33490be27a0d86c6268bc4fd # v6.1.0
       with:
         path: ${{ steps.set-up-homebrew.outputs.gems-path }}
         key: ${{ steps.setup-cache.outputs.cache_key_prefix }}-rubygems-${{ steps.set-up-homebrew.outputs.gems-hash }}
@@ -112,7 +112,7 @@ runs:
 
     - name: Download bottles from GitHub Actions
       if: fromJson(inputs.download-bottles)
-      uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+      uses: chainguard-actions/actions-download-artifact@d0056a87e7a5e15c79b2dc00f9a66d1aaf86907d # v8.0.2
       with:
         pattern: bottles_${{ steps.setup-bottles.outputs.bottle_specifier }}*
         path: ${{ inputs.bottles-directory }}

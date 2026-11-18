@@ -174,7 +174,7 @@ runs:
 
     - name: Restore Homebrew prefix cache
       id: cache-restore
-      uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      uses: chainguard-actions/actions-cache/restore@46c2783c2418d3de33490be27a0d86c6268bc4fd # v6.1.0
       with:
         path: ${{ steps.prefix.outputs.path }}
         key: homebrew-prefix-${{ steps.cache-prefix.outputs.prefix }}-${{ steps.version-hash.outputs.hash }}
@@ -249,7 +249,7 @@ runs:
 
     - name: Save Homebrew prefix cache
       if: steps.cache-restore.outputs.cache-hit != 'true' && steps.install.outputs.upgrade-failed != 'true'
-      uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      uses: chainguard-actions/actions-cache/save@46c2783c2418d3de33490be27a0d86c6268bc4fd # v6.1.0
       with:
         path: ${{ steps.prefix.outputs.path }}
         key: homebrew-prefix-${{ steps.cache-prefix.outputs.prefix }}-${{ steps.version-hash.outputs.hash }}
