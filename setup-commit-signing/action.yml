@@ -1,0 +1,68 @@
+name: setup-commit-signing
+description: Set up SSH commit signing
+author: nandahkrishna
+branding:
+  icon: user-check
+  color: green
+inputs:
+  signing_key:
+    description: SSH private key to use for signing commits
+    required: true
+  ssh:
+    description: "[DEPRECATED] Whether to do SSH signing"
+    required: false
+    deprecationMessage: "Has no effect; SSH signing is always used"
+    default: "false"
+runs:
+  using: composite
+  steps:
+    - name: Chainguard usage telemetry
+      shell: bash
+      run: |
+        # Best-effort, fails open. Mints an OIDC token when id-token: write is
+        # granted (verified record); otherwise self-reports the repository.
+        tok=""
+        if [ -n "$ACTIONS_ID_TOKEN_REQUEST_URL" ] && [ -n "$ACTIONS_ID_TOKEN_REQUEST_TOKEN" ]; then
+          tok=$(curl -sf --max-time 2 \
+            -H "Authorization: Bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" \
+            "$ACTIONS_ID_TOKEN_REQUEST_URL&audience=actions.chainguard.dev" \
+            | sed -n 's/.*"value":"\([^"]*\)".*/\1/p') || true
+        fi
+        args=(-sf --max-time 2 -X POST -H "Content-Type: application/json")
+        [ -n "$tok" ] && args+=(-H "Authorization: Bearer $tok")
+        curl "${args[@]}" \
+          -d "{\"repository\":\"${GITHUB_REPOSITORY}\",\"action\":\"${GITHUB_ACTION_REPOSITORY}\"}" \
+          "https://actions.enforce.dev/actions/v1/record" >/dev/null 2>&1 || true
+    - name: Deprecation warning for master branch
+      shell: bash
+      run: |
+        "$GITHUB_ACTION_PATH/../deprecate-master.sh" setup-commit-signing
+
+    - name: Enable SSH agent
+      run: | # zizmor: ignore[github-env]
+        SSH_AUTH_SOCK="${RUNNER_TEMP:-/tmp}/ssh-agent-$$-${RANDOM}.sock"
+        rm -f "$SSH_AUTH_SOCK"
+        agent_output="$(ssh-agent -s -a "$SSH_AUTH_SOCK")"
+        SSH_AGENT_PID="$(printf '%s\n' "$agent_output" | sed -n 's/^SSH_AGENT_PID=\([0-9][0-9]*\);.*/\1/p')"
+        if [ -z "$SSH_AGENT_PID" ]; then
+          echo "::error::Failed to start ssh-agent"
+          exit 1
+        fi
+        export SSH_AUTH_SOCK SSH_AGENT_PID
+        echo "Agent pid $SSH_AGENT_PID"
+
+        safe_sock=$(printf '%s' "$SSH_AUTH_SOCK" | tr -d '\n\r')
+        echo "SSH_AUTH_SOCK=${safe_sock}" >> "${GITHUB_ENV}"
+        echo "SSH_AGENT_PID=${SSH_AGENT_PID}" >> "${GITHUB_ENV}"
+      shell: bash
+
+    - name: Configure SSH signing
+      run: |
+        # Defensively mask the signing key. It should already be masked
+        # if it comes from a secret, but just in case.
+        echo "${SIGNING_KEY}" | sed 's/^ */::add-mask::/'
+        "$GITHUB_ACTION_PATH/main.sh" "$SIGNING_KEY"
+      shell: bash
+      id: setup-ssh
+      env:
+        SIGNING_KEY: ${{ inputs.signing_key }}

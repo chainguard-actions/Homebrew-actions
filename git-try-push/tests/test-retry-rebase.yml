@@ -1,0 +1,57 @@
+name: Test retry with rebase
+on:
+  workflow_dispatch:
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - name: Set up diverged local and remote histories
+        run: |
+          set -e
+          T="$RUNNER_TEMP/gtp"
+          rm -rf "$T"; mkdir -p "$T"
+          git init --bare -b main "$T/remote.git"
+          git clone "$T/remote.git" "$T/work"
+          cd "$T/work"
+          git config user.email "test@example.com"
+          git config user.name "Test User"
+          git symbolic-ref HEAD refs/heads/main
+          echo base > base.txt; git add base.txt; git commit -m base
+          git push origin main
+          # Someone else pushes a commit on top
+          git clone "$T/remote.git" "$T/other"
+          cd "$T/other"
+          git config user.email "other@example.com"
+          git config user.name "Other User"
+          git checkout main
+          echo upstream > upstream.txt; git add upstream.txt; git commit -m upstream
+          git push origin main
+          git rev-parse HEAD > "$T/upstream-sha"
+          # Local commit on a stale base (non-conflicting file)
+          cd "$T/work"
+          echo local > local.txt; git add local.txt; git commit -m local-change
+          git switch -c scratch
+      - id: action
+        uses: .
+        with:
+          directory: ${{ runner.temp }}/gtp/work
+          branch: main
+          tries: "3"
+      - name: Assert remote contains both commits, rebased
+        run: |
+          T="$RUNNER_TEMP/gtp"
+          R="$T/remote.git"
+          git --git-dir="$R" log --oneline main
+          SUBJ="$(git --git-dir="$R" log -1 --format=%s main)"
+          echo "head subject: $SUBJ"
+          if [ "$SUBJ" != "local-change" ]; then
+            echo "FAIL: expected local-change at remote tip"
+            exit 1
+          fi
+          PARENT="$(git --git-dir="$R" rev-parse main~1)"
+          if [ "$PARENT" != "$(cat "$T/upstream-sha")" ]; then
+            echo "FAIL: local commit was not rebased onto upstream commit"
+            exit 1
+          fi
+          echo "PASS"

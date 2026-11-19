@@ -1,0 +1,79 @@
+# Setup Ruby (Homebrew) GitHub Action
+
+An action that sets up Ruby using Homebrew.
+
+Runs on `ubuntu` and `macos` (requires Homebrew).
+
+## Usage
+
+Set up Ruby with an existing Homebrew installation:
+
+```yaml
+- name: Set up Homebrew
+  uses: Homebrew/actions/setup-homebrew@1f8e202ffddf94def7f42f6fa3a482e821489f9c # 2026.07.10.1
+
+- name: Set up Ruby
+  uses: Homebrew/actions/setup-ruby@1f8e202ffddf94def7f42f6fa3a482e821489f9c # 2026.07.10.1
+```
+
+Set up Homebrew from this action when requested:
+
+```yaml
+- name: Set up Ruby and Homebrew
+  uses: Homebrew/actions/setup-ruby@1f8e202ffddf94def7f42f6fa3a482e821489f9c # 2026.07.10.1
+  with:
+    setup-homebrew: true
+```
+
+To use Homebrew's portable Ruby instead of the `ruby` formula:
+
+```yaml
+- name: Set up Homebrew portable Ruby
+  uses: Homebrew/actions/setup-ruby@1f8e202ffddf94def7f42f6fa3a482e821489f9c # 2026.07.10.1
+  with:
+    portable-ruby: true
+```
+
+Enable Bundler cache:
+
+```yaml
+- name: Set up Ruby with Bundler cache
+  uses: Homebrew/actions/setup-ruby@1f8e202ffddf94def7f42f6fa3a482e821489f9c # 2026.07.10.1
+  with:
+    setup-homebrew: true
+    bundler-cache: true
+```
+
+Run from a specific subdirectory:
+
+```yaml
+- name: Set up Ruby from subdirectory
+  uses: Homebrew/actions/setup-ruby@1f8e202ffddf94def7f42f6fa3a482e821489f9c # 2026.07.10.1
+  with:
+    setup-homebrew: true
+    working-directory: path/to/project
+```
+
+## Outputs
+
+- `ruby-path`: Path to the Ruby executable.
+- `ruby-prefix`: Ruby installation prefix.
+- `ruby-version`: Ruby version string.
+
+## Notes
+
+- When `portable-ruby` is `false`, this action installs Homebrew's `ruby` formula (if needed) and adds it to `PATH`.
+- When `portable-ruby` is `true`, this action uses the same Ruby Homebrew runs (`brew ruby`) and adds it to `PATH`.
+- `setup-homebrew` defaults to `false` and only runs `Homebrew/actions/setup-homebrew` when explicitly enabled.
+- When `Gemfile` is present, this action runs `bundle check` and runs `bundle install --jobs 4 --retry 3` only when needed.
+- `bundler-cache` defaults to `false`. When enabled, this action:
+  - Caches `vendor/bundle` using `actions/cache`.
+  - Configures Bundler to install gems to `vendor/bundle`.
+  - Requires `Gemfile` in the current working directory.
+  - Uses `Gemfile.lock` for cache hashing when present, otherwise falls back to `Gemfile`.
+  - Includes Ruby version, portable Ruby mode and Ruby prefix in cache key derivation.
+- `working-directory` defaults to `.` and is used for Ruby setup, Gemfile discovery, and Bundler commands.
+
+## Privacy
+
+This Action contacts Chainguard's licensing server to verify authorization. Connection metadata (IP address, GitHub repository identifier, timestamp, and any metadata encoded in the auth token) is transmitted to Chainguard, Inc. even if authorization is denied in accordance with our [Privacy Notice](https://www.chainguard.dev/legal/privacy-notice)

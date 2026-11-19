@@ -1,0 +1,40 @@
+name: Test custom workdir, result_path and collapse
+on:
+  workflow_dispatch:
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - name: Ensure deprecate-master.sh helper exists next to the action
+        run: |
+          helper="$(dirname "$GITHUB_WORKSPACE")/deprecate-master.sh"
+          if [ ! -x "$helper" ]; then
+            printf '#!/bin/sh\nexit 0\n' > "$helper"
+            chmod +x "$helper"
+          fi
+      - name: Create result file at custom path
+        run: |
+          mkdir -p "$RUNNER_TEMP/custom-work/out"
+          printf 'custom output line 1\ncustom output line 2\n' > "$RUNNER_TEMP/custom-work/out/result.log"
+          # also create a default-path file that must be left alone
+          mkdir -p "$GITHUB_WORKSPACE/bottles"
+          echo "untouched" > "$GITHUB_WORKSPACE/bottles/steps_output.txt"
+      - id: action
+        uses: .
+        with:
+          workdir: ${{ runner.temp }}/custom-work
+          result_path: out/result.log
+          step_name: Custom heading
+          collapse: 'true'
+      - name: Assert custom result file removed and default file untouched
+        run: |
+          if [ -e "$RUNNER_TEMP/custom-work/out/result.log" ]; then
+            echo "FAIL: custom result file still exists"
+            exit 1
+          fi
+          if [ ! -f "$GITHUB_WORKSPACE/bottles/steps_output.txt" ]; then
+            echo "FAIL: default-path file was removed but should not be"
+            exit 1
+          fi
+          echo "PASS"

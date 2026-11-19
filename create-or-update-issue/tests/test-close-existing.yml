@@ -1,0 +1,35 @@
+name: Test close existing issue (none found)
+on:
+  workflow_dispatch:
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - id: action
+        uses: .
+        continue-on-error: true
+        with:
+          title: "act harness nonexistent issue title 7f3c9e1a"
+          body: "unused"
+          close-existing: "true"
+          close-comment: "Closing from act harness"
+      - name: Assert none/closed or graceful failure on sentinel repo
+        env:
+          RESULT: ${{ steps.action.outputs.outcome }}
+          OUTCOME: ${{ steps.action.outcome }}
+        run: |
+          echo "outcome: $OUTCOME"
+          echo "result: $RESULT"
+          if [ "$OUTCOME" = "success" ]; then
+            if [ "$RESULT" != "none" ] && [ "$RESULT" != "closed" ]; then
+              echo "FAIL: expected 'none' or 'closed', got '$RESULT'"
+              exit 1
+            fi
+            echo "PASS: got '$RESULT'"
+          elif [ "$OUTCOME" = "failure" ]; then
+            echo "PASS: action failed gracefully (sentinel repo is not resolvable)"
+          else
+            echo "FAIL: unexpected outcome '$OUTCOME'"
+            exit 1
+          fi

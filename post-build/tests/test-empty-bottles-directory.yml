@@ -1,0 +1,41 @@
+name: Test empty bottles directory
+on:
+  workflow_dispatch:
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - name: Prepare empty directories
+        run: |
+          rm -rf bottles-empty logs-empty
+          mkdir -p bottles-empty logs-empty
+          echo 'log' > logs-empty/build.log
+      - id: action
+        uses: .
+        continue-on-error: true
+        with:
+          bottles-directory: bottles-empty
+          logs-directory: logs-empty
+          runner: ubuntu-empty
+          cleanup: "false"
+          upload-bottles: "true"
+      - name: Assert bottles directory preserved when cleanup is disabled
+        env:
+          OUTCOME: ${{ steps.action.outcome }}
+        run: |
+          echo "outcome: $OUTCOME"
+          if [ "$OUTCOME" != "success" ] && [ "$OUTCOME" != "failure" ]; then
+            echo "FAIL: unexpected outcome '$OUTCOME'"
+            exit 1
+          fi
+          if [ ! -d bottles-empty ]; then
+            echo "FAIL: bottles directory should still exist with cleanup=false"
+            exit 1
+          fi
+          if [ -n "$(ls -A bottles-empty)" ]; then
+            echo "FAIL: bottles directory should remain empty"
+            ls -la bottles-empty
+            exit 1
+          fi
+          echo "PASS"

@@ -1,0 +1,32 @@
+name: Test basic usage (default inputs)
+on:
+  workflow_dispatch:
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - name: Ensure deprecate-master.sh helper exists next to the action
+        run: |
+          helper="$(dirname "$GITHUB_WORKSPACE")/deprecate-master.sh"
+          if [ ! -x "$helper" ]; then
+            printf '#!/bin/sh\nexit 0\n' > "$helper"
+            chmod +x "$helper"
+          fi
+      - name: Create result file at default path
+        run: |
+          mkdir -p "$GITHUB_WORKSPACE/bottles"
+          printf '\033[31mError: something failed\033[0m\nplain line\n' > "$GITHUB_WORKSPACE/bottles/steps_output.txt"
+      - id: action
+        uses: .
+      - name: Assert result file was consumed (removed)
+        run: |
+          if [ -e "$GITHUB_WORKSPACE/bottles/steps_output.txt" ]; then
+            echo "FAIL: result file still exists"
+            exit 1
+          fi
+          echo "PASS: result file removed"
+      - name: Show step summary (informational)
+        run: |
+          echo "summary: ${GITHUB_STEP_SUMMARY:-unset}"
+          [ -f "${GITHUB_STEP_SUMMARY:-/nonexistent}" ] && cat "$GITHUB_STEP_SUMMARY" || true

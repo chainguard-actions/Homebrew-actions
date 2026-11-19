@@ -1,0 +1,55 @@
+name: Test basic install
+on:
+  workflow_dispatch:
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - name: Set up fake brew
+        run: bash "$GITHUB_WORKSPACE/tests/fixtures/setup-fake-brew.sh"
+      - id: action
+        uses: .
+        with:
+          install: hello
+      - name: Assert prefix output
+        env:
+          ACTUAL: ${{ steps.action.outputs.prefix }}
+        run: |
+          echo "actual: $ACTUAL"
+          if [ "$ACTUAL" != "$FAKE_BREW_ROOT/prefix" ]; then
+            echo "FAIL: expected $FAKE_BREW_ROOT/prefix"
+            exit 1
+          fi
+          echo "PASS"
+      - name: Assert cache-prefix output
+        env:
+          ACTUAL: ${{ steps.action.outputs.cache-prefix }}
+        run: |
+          . /etc/os-release
+          EXPECTED="${ID:-linux}-${VERSION_ID:-unknown}-$(uname -m)"
+          echo "actual: $ACTUAL expected: $EXPECTED"
+          if [ "$ACTUAL" != "$EXPECTED" ]; then
+            echo "FAIL"
+            exit 1
+          fi
+          echo "PASS"
+      - name: Assert cache-key output
+        env:
+          ACTUAL: ${{ steps.action.outputs.cache-key }}
+        run: |
+          EXPECTED="$(printf 'hello 2.12 0\n' | sha256sum | cut -d' ' -f1)"
+          echo "actual: $ACTUAL expected: $EXPECTED"
+          if [ "$ACTUAL" != "$EXPECTED" ]; then
+            echo "FAIL"
+            exit 1
+          fi
+          echo "PASS"
+      - name: Assert brew install was invoked
+        run: |
+          cat "$FAKE_BREW_ROOT/calls.log"
+          if ! grep -qx 'install --formula hello' "$FAKE_BREW_ROOT/calls.log"; then
+            echo "FAIL: brew install --formula hello not called"
+            exit 1
+          fi
+          echo "PASS"

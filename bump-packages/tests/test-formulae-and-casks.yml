@@ -1,0 +1,48 @@
+name: Test bump formulae and casks together
+on:
+  workflow_dispatch:
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - name: Set up fake brew and deprecation script stub
+        run: |
+          set -e
+          FAKE_BIN="$RUNNER_TEMP/fake-bin"
+          mkdir -p "$FAKE_BIN"
+          cat > "$FAKE_BIN/brew" <<'EOF'
+          #!/bin/bash
+          echo "$*" >> "$RUNNER_TEMP/brew-calls.log"
+          exit 0
+          EOF
+          chmod +x "$FAKE_BIN/brew"
+          echo "$FAKE_BIN" >> "$GITHUB_PATH"
+          rm -f "$RUNNER_TEMP/brew-calls.log"
+          STUB="$(dirname "$GITHUB_WORKSPACE")/deprecate-master.sh"
+          if [ ! -e "$STUB" ]; then
+            printf '#!/bin/bash\nexit 0\n' > "$STUB" 2>/dev/null || \
+              printf '#!/bin/bash\nexit 0\n' | sudo tee "$STUB" >/dev/null
+            chmod +x "$STUB" 2>/dev/null || sudo chmod +x "$STUB"
+          fi
+      - id: action
+        uses: .
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          formulae: homebrew/core/wget
+          casks: firefox
+          fork: 'false'
+      - name: Assert two brew bump invocations
+        run: |
+          echo "--- brew calls ---"
+          cat "$RUNNER_TEMP/brew-calls.log" || true
+          EXPECTED="$(printf '%s\n%s' \
+            "bump --no-fork --full-name --open-pr --formulae homebrew/core/wget" \
+            "bump --no-fork --open-pr --casks firefox")"
+          ACTUAL="$(cat "$RUNNER_TEMP/brew-calls.log")"
+          if [ "$ACTUAL" != "$EXPECTED" ]; then
+            echo "FAIL: expected:"
+            echo "$EXPECTED"
+            exit 1
+          fi
+          echo "PASS"

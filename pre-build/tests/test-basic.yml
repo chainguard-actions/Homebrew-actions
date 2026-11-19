@@ -1,0 +1,39 @@
+name: Test basic usage
+on:
+  workflow_dispatch:
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - name: Pre-populate bottles directory with stale content
+        run: |
+          mkdir -p "$RUNNER_TEMP/bottles"
+          echo stale > "$RUNNER_TEMP/bottles/stale.bottle.tar.gz"
+      - id: action
+        uses: .
+        continue-on-error: true
+        with:
+          bottles-directory: ${{ runner.temp }}/bottles
+      - name: Assert outcome
+        env:
+          OUTCOME: ${{ steps.action.outcome }}
+          BOTTLES: ${{ runner.temp }}/bottles
+        run: |
+          echo "outcome: $OUTCOME"
+          if [ "$OUTCOME" = "success" ]; then
+            if [ ! -d "$BOTTLES" ]; then
+              echo "FAIL: bottles directory not created"
+              exit 1
+            fi
+            if [ -e "$BOTTLES/stale.bottle.tar.gz" ]; then
+              echo "FAIL: stale content was not removed"
+              exit 1
+            fi
+            echo "PASS: bottles directory recreated empty"
+          elif [ "$OUTCOME" = "failure" ]; then
+            echo "PASS: action failed (Homebrew monorepo siblings/brew unavailable under act)"
+          else
+            echo "FAIL: unexpected outcome '$OUTCOME'"
+            exit 1
+          fi

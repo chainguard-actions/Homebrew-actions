@@ -1,0 +1,37 @@
+# Setup Homebrew GitHub Action
+
+An action that sets up a Homebrew environment.
+
+Runs on `ubuntu` and `macos`.
+
+## Usage
+
+```yaml
+- name: Set up Homebrew
+  id: set-up-homebrew
+  uses: Homebrew/actions/setup-homebrew@1f8e202ffddf94def7f42f6fa3a482e821489f9c # 2026.07.10.1
+```
+
+This also sets up the variables necessary to cache the gems installed by Homebrew developer commands (e.g. `brew style`). To use these add:
+
+```yaml
+- name: Cache Homebrew Bundler RubyGems
+  id: cache
+  uses: actions/cache@v5
+  with:
+    path: ${{ steps.set-up-homebrew.outputs.gems-path }}
+    key: ${{ runner.os }}-rubygems-${{ steps.set-up-homebrew.outputs.gems-hash }}
+    restore-keys: ${{ runner.os }}-rubygems-
+
+- name: Install Homebrew Bundler RubyGems
+  if: steps.cache.outputs.cache-hit != 'true'
+  run: brew install-bundler-gems
+```
+
+Note you do not need to use the `actions/setup-ruby` or `actions/checkout` steps because this action will install the necessary Ruby for Homebrew and checkout the repository being tested.
+
+By default, `homebrew/brew` is checked out at the latest stable tag for non-`brew`, non-tap repositories, matching standard Homebrew installations. For `brew` and tap repositories, `homebrew/brew` stays on `main` unless `stable: true` is set explicitly.
+
+## Privacy
+
+This Action contacts Chainguard's licensing server to verify authorization. Connection metadata (IP address, GitHub repository identifier, timestamp, and any metadata encoded in the auth token) is transmitted to Chainguard, Inc. even if authorization is denied in accordance with our [Privacy Notice](https://www.chainguard.dev/legal/privacy-notice)

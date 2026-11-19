@@ -1,0 +1,35 @@
+name: Test RSA key signing setup
+on:
+  workflow_dispatch:
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - name: Generate RSA test key
+        id: key
+        run: |
+          git config --global user.email "rsa@example.com"
+          git config --global user.name "RSA User"
+          tmp="$(mktemp -d)"
+          ssh-keygen -q -t rsa -b 3072 -N "" -C "rsa@example.com" -f "$tmp/id"
+          {
+            echo "key<<EOF_KEY"
+            cat "$tmp/id"
+            echo "EOF_KEY"
+            echo "pub=$(cut -d' ' -f1,2 "$tmp/id.pub")"
+          } >> "$GITHUB_OUTPUT"
+      - id: action
+        uses: .
+        with:
+          signing_key: ${{ steps.key.outputs.key }}
+      - name: Assert config uses RSA key
+        env:
+          PUB: ${{ steps.key.outputs.pub }}
+        run: |
+          sk="$(git config --global user.signingkey)"; echo "user.signingkey: $sk"
+          case "$sk" in ssh-rsa*) ;; *) echo "FAIL: expected ssh-rsa key"; exit 1 ;; esac
+          case "$sk" in "$PUB"*) ;; *) echo "FAIL: signingkey mismatch"; exit 1 ;; esac
+          grep -qF "rsa@example.com $PUB" "$HOME/.ssh/allowed_signers" || { echo "FAIL: allowed signer entry missing"; exit 1; }
+          [ "$(git config --global gpg.format)" = "ssh" ] || { echo "FAIL: gpg.format"; exit 1; }
+          echo "PASS"

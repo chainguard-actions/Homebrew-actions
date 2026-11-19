@@ -1,0 +1,45 @@
+name: Test bundle is skipped without a Gemfile
+on:
+  workflow_dispatch:
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - name: Set up fake Homebrew and empty project
+        run: |
+          rm -rf /tmp/fakebrew
+          mkdir -p /tmp/fakebrew/bin
+          cp "$GITHUB_WORKSPACE/tests/fixtures/fake-brew.sh" /tmp/fakebrew/bin/brew
+          chmod +x /tmp/fakebrew/bin/brew
+          : > /tmp/fakebrew/calls.log
+          echo "/tmp/fakebrew/bin" >> "$GITHUB_PATH"
+          if [ ! -e "$GITHUB_WORKSPACE/../deprecate-master.sh" ]; then
+            { printf '#!/bin/sh\nexit 0\n' > "$GITHUB_WORKSPACE/../deprecate-master.sh" && chmod +x "$GITHUB_WORKSPACE/../deprecate-master.sh"; } || true
+          fi
+          mkdir -p empty-project
+      # act cannot parse the (skipped) `uses: $/setup-homebrew` step and marks the
+      # composite failed after its inner steps succeed; assert side effects instead.
+      - id: action
+        uses: .
+        continue-on-error: true
+        with:
+          working-directory: empty-project
+      - name: Assert no bundler commands ran
+        env:
+          OUTCOME: ${{ steps.action.outcome }}
+          RUBY_VERSION: ${{ steps.action.outputs.ruby-version }}
+        run: |
+          echo "outcome: $OUTCOME"
+          echo "ruby-version: $RUBY_VERSION"
+          cat /tmp/fakebrew/calls.log
+          if [ "$OUTCOME" != "success" ] && [ "$OUTCOME" != "failure" ]; then
+            echo "FAIL: unexpected outcome '$OUTCOME'"; exit 1
+          fi
+          if [ "$RUBY_VERSION" != "3.4.1" ]; then
+            echo "FAIL: unexpected ruby-version"; exit 1
+          fi
+          if grep -q "^bundle" /tmp/fakebrew/calls.log; then
+            echo "FAIL: bundle should not run without a Gemfile"; exit 1
+          fi
+          echo "PASS"

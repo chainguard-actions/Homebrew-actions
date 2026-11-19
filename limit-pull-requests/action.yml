@@ -1,0 +1,44 @@
+name: Limit pull requests
+description: >
+  Limit the number of open pull requests to the repository created by a user
+author: ZhongRuoyu
+branding:
+  icon: alert-triangle
+  color: yellow
+
+inputs:
+  token:
+    description: GitHub token
+    required: false
+    default: ${{ github.token }}
+  except-users:
+    description: The users exempted from the limit, one per line
+    required: false
+  # https://docs.github.com/en/graphql/reference/enums#commentauthorassociation
+  except-author-associations:
+    description: The author associations exempted from the limit, one per line
+    required: false
+  comment-limit:
+    description: >
+      Post the comment when the user's number of open pull requests exceeds this
+      number and `comment` is not empty
+    required: true
+    default: "10"
+  comment:
+    description: The comment to post when the limit is reached
+    required: false
+  close-limit:
+    description: >
+      Close the pull request when the user's number of open pull requests
+      exceeds this number and `close` is set to `true`
+    required: true
+    default: "50"
+  close:
+    description: Whether to close the pull request when the limit is reached
+    required: true
+    default: "false"
+
+runs:
+  pre: chainguard-phonehome.js
+  using: node24
+  main: main.mts

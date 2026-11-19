@@ -1,0 +1,40 @@
+name: Test stable false
+on:
+  workflow_dispatch:
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - id: action
+        uses: .
+        with:
+          stable: "false"
+      - name: Assert gems-hash output is a sha256
+        env:
+          ACTUAL: ${{ steps.action.outputs.gems-hash }}
+        run: |
+          echo "actual: $ACTUAL"
+          if ! echo "$ACTUAL" | grep -qE '^[0-9a-f]{64}$'; then
+            echo "FAIL: gems-hash is not a sha256 hex digest"
+            exit 1
+          fi
+          echo "PASS"
+      - name: Assert HOMEBREW_UPDATE_TO_TAG not set
+        run: |
+          echo "HOMEBREW_UPDATE_TO_TAG='${HOMEBREW_UPDATE_TO_TAG:-}'"
+          if [ "${HOMEBREW_UPDATE_TO_TAG:-}" = "1" ]; then
+            echo "FAIL: HOMEBREW_UPDATE_TO_TAG should not be set when stable=false"
+            exit 1
+          fi
+          echo "PASS"
+      - name: Assert Homebrew repo is on main
+        run: |
+          export PATH="/home/linuxbrew/.linuxbrew/bin:/opt/homebrew/bin:/usr/local/bin:$PATH"
+          BRANCH="$(git -C "$(brew --repo)" symbolic-ref --short HEAD)"
+          echo "branch: $BRANCH"
+          if [ "$BRANCH" != "main" ]; then
+            echo "FAIL: expected branch 'main'"
+            exit 1
+          fi
+          echo "PASS"

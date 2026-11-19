@@ -1,0 +1,68 @@
+name: Test origin_branch rebase target
+on:
+  workflow_dispatch:
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - name: Set up remote with feature and upstream branches
+        run: |
+          set -e
+          T="$RUNNER_TEMP/gtp-origin"
+          rm -rf "$T"; mkdir -p "$T"
+          git init --bare -b main "$T/remote.git"
+          git clone "$T/remote.git" "$T/work"
+          cd "$T/work"
+          git config user.email "test@example.com"
+          git config user.name "Test User"
+          git symbolic-ref HEAD refs/heads/main
+          echo base > base.txt; git add base.txt; git commit -m base
+          git push origin main
+          # Other contributor: feature = base+U, upstream = base+U+W
+          git clone "$T/remote.git" "$T/other"
+          cd "$T/other"
+          git config user.email "other@example.com"
+          git config user.name "Other User"
+          git checkout main
+          echo u > u.txt; git add u.txt; git commit -m commit-u
+          git rev-parse HEAD > "$T/u-sha"
+          git push origin HEAD:refs/heads/feature
+          echo w > w.txt; git add w.txt; git commit -m commit-w
+          git rev-parse HEAD > "$T/w-sha"
+          git push origin HEAD:refs/heads/upstream
+          # Local commit on stale base
+          cd "$T/work"
+          echo local > local.txt; git add local.txt; git commit -m local-change
+          git switch -c scratch
+      - id: action
+        uses: .
+        with:
+          directory: ${{ runner.temp }}/gtp-origin/work
+          branch: main
+          remote_branch: feature
+          origin_branch: upstream
+          tries: "3"
+      - name: Assert feature was rebased onto origin_branch (upstream)
+        run: |
+          T="$RUNNER_TEMP/gtp-origin"
+          R="$T/remote.git"
+          git --git-dir="$R" log --oneline feature
+          SUBJ="$(git --git-dir="$R" log -1 --format=%s feature)"
+          echo "feature tip subject: $SUBJ"
+          if [ "$SUBJ" != "local-change" ]; then
+            echo "FAIL: expected local-change at feature tip"
+            exit 1
+          fi
+          PARENT="$(git --git-dir="$R" rev-parse feature~1)"
+          echo "parent: $PARENT  expected (W): $(cat "$T/w-sha")"
+          if [ "$PARENT" != "$(cat "$T/w-sha")" ]; then
+            echo "FAIL: local commit was not rebased onto upstream branch tip"
+            exit 1
+          fi
+          MAIN_SUBJ="$(git --git-dir="$R" log -1 --format=%s main)"
+          if [ "$MAIN_SUBJ" != "base" ]; then
+            echo "FAIL: remote main should be untouched, got '$MAIN_SUBJ'"
+            exit 1
+          fi
+          echo "PASS"

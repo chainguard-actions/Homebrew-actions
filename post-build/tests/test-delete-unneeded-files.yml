@@ -1,0 +1,57 @@
+name: Test delete unneeded files
+on:
+  workflow_dispatch:
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - name: Prepare bottles and logs directories
+        run: |
+          rm -rf bottles-test logs-test
+          mkdir -p bottles-test/logs bottles-test/home bottles-test/failed bottles-test/artifact-cache logs-test
+          echo '{}' > bottles-test/foo--1.0.json
+          echo 'bottle' > bottles-test/foo--1.0.tar.gz
+          echo '{}' > bottles-test/failed/bar--1.0.json
+          echo 'x' > bottles-test/tested-dependents-linux.txt
+          echo 'y' > bottles-test/skipped_or_failed_formulae-linux.txt
+          echo 'log' > bottles-test/logs/test.log
+          echo 'log' > logs-test/build.log
+      - id: action
+        uses: .
+        continue-on-error: true
+        with:
+          bottles-directory: bottles-test
+          logs-directory: logs-test
+          runner: ubuntu-test
+          cleanup: "false"
+          upload-bottles: "false"
+      - name: Assert unneeded files were deleted and bottles kept
+        env:
+          OUTCOME: ${{ steps.action.outcome }}
+        run: |
+          echo "outcome: $OUTCOME"
+          if [ "$OUTCOME" != "success" ] && [ "$OUTCOME" != "failure" ]; then
+            echo "FAIL: unexpected outcome '$OUTCOME'"
+            exit 1
+          fi
+          ls -la bottles-test || true
+          fail=0
+          for p in logs home failed artifact-cache tested-dependents-linux.txt; do
+            if [ -e "bottles-test/$p" ]; then
+              echo "FAIL: bottles-test/$p should have been deleted"
+              fail=1
+            fi
+          done
+          for p in foo--1.0.json foo--1.0.tar.gz skipped_or_failed_formulae-linux.txt; do
+            if [ ! -e "bottles-test/$p" ]; then
+              echo "FAIL: bottles-test/$p should have been kept"
+              fail=1
+            fi
+          done
+          if [ ! -f logs-test/build.log ]; then
+            echo "FAIL: logs directory should be untouched"
+            fail=1
+          fi
+          [ "$fail" -eq 0 ] || exit 1
+          echo "PASS"

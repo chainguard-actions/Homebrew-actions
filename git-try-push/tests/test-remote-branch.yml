@@ -1,0 +1,53 @@
+name: Test remote_branch
+on:
+  workflow_dispatch:
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - name: Set up local bare remote and working clone
+        run: |
+          set -e
+          T="$RUNNER_TEMP/gtp"
+          rm -rf "$T"; mkdir -p "$T"
+          git init --bare -b main "$T/remote.git"
+          git clone "$T/remote.git" "$T/work"
+          cd "$T/work"
+          git config user.email "test@example.com"
+          git config user.name "Test User"
+          git symbolic-ref HEAD refs/heads/main
+          echo one > a.txt; git add a.txt; git commit -m one
+          git push origin main
+          git rev-parse HEAD > "$T/main-before"
+          git checkout -b local-feature
+          echo two > b.txt; git add b.txt; git commit -m two
+          git rev-parse HEAD > "$T/expected"
+          git switch -c scratch
+      - id: action
+        uses: .
+        with:
+          directory: ${{ runner.temp }}/gtp/work
+          branch: local-feature
+          remote_branch: published-feature
+          tries: "2"
+      - name: Assert remote branch created and main untouched
+        run: |
+          T="$RUNNER_TEMP/gtp"
+          EXPECTED="$(cat "$T/expected")"
+          ACTUAL="$(git --git-dir="$T/remote.git" rev-parse refs/heads/published-feature)"
+          echo "expected: $EXPECTED actual: $ACTUAL"
+          if [ "$EXPECTED" != "$ACTUAL" ]; then
+            echo "FAIL: published-feature not at expected commit"
+            exit 1
+          fi
+          if git --git-dir="$T/remote.git" rev-parse --verify -q refs/heads/local-feature; then
+            echo "FAIL: local-feature should not exist on remote"
+            exit 1
+          fi
+          MAIN="$(git --git-dir="$T/remote.git" rev-parse refs/heads/main)"
+          if [ "$MAIN" != "$(cat "$T/main-before")" ]; then
+            echo "FAIL: remote main changed"
+            exit 1
+          fi
+          echo "PASS"

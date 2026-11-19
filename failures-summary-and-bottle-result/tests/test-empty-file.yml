@@ -1,0 +1,31 @@
+name: Test empty result file is left in place
+on:
+  workflow_dispatch:
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - name: Ensure deprecate-master.sh helper exists next to the action
+        run: |
+          helper="$(dirname "$GITHUB_WORKSPACE")/deprecate-master.sh"
+          if [ ! -x "$helper" ]; then
+            printf '#!/bin/sh\nexit 0\n' > "$helper"
+            chmod +x "$helper"
+          fi
+      - name: Create empty result file
+        run: |
+          mkdir -p "$RUNNER_TEMP/empty-work"
+          : > "$RUNNER_TEMP/empty-work/empty.txt"
+      - id: action
+        uses: .
+        with:
+          workdir: ${{ runner.temp }}/empty-work
+          result_path: empty.txt
+      - name: Assert empty file was not processed (still exists)
+        run: |
+          if [ ! -f "$RUNNER_TEMP/empty-work/empty.txt" ]; then
+            echo "FAIL: empty file was removed; expected early exit"
+            exit 1
+          fi
+          echo "PASS"

@@ -1,0 +1,42 @@
+name: Test uninstall existing formulae
+on:
+  workflow_dispatch:
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - name: Set up fake brew with a preinstalled formula
+        run: bash "$GITHUB_WORKSPACE/tests/fixtures/setup-fake-brew.sh" wget
+      - id: action
+        uses: .
+        with:
+          install: hello
+          uninstall: "true"
+      - name: Assert cleanup ran and install happened
+        run: |
+          cat "$FAKE_BREW_ROOT/calls.log"
+          if ! grep -qx 'test-bot --only-cleanup-before' "$FAKE_BREW_ROOT/calls.log"; then
+            echo "FAIL: brew test-bot --only-cleanup-before not called"
+            exit 1
+          fi
+          if ! grep -qx 'install --formula hello' "$FAKE_BREW_ROOT/calls.log"; then
+            echo "FAIL: brew install not called"
+            exit 1
+          fi
+          if grep -qx 'wget' "$FAKE_BREW_ROOT/installed"; then
+            echo "FAIL: wget should have been removed"
+            exit 1
+          fi
+          echo "PASS"
+      - name: Assert cache-key output
+        env:
+          ACTUAL: ${{ steps.action.outputs.cache-key }}
+        run: |
+          EXPECTED="$(printf 'hello 2.12 0\n' | sha256sum | cut -d' ' -f1)"
+          echo "actual: $ACTUAL"
+          if [ "$ACTUAL" != "$EXPECTED" ]; then
+            echo "FAIL: expected $EXPECTED"
+            exit 1
+          fi
+          echo "PASS"

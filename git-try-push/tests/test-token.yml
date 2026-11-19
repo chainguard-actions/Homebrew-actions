@@ -1,0 +1,47 @@
+name: Test token configures auth header
+on:
+  workflow_dispatch:
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - name: Set up local repo and remote
+        run: |
+          set -e
+          T="$RUNNER_TEMP/gtp-token"
+          rm -rf "$T"; mkdir -p "$T"
+          git init --bare -b main "$T/remote.git"
+          git clone "$T/remote.git" "$T/work"
+          cd "$T/work"
+          git config user.email "test@example.com"
+          git config user.name "Test User"
+          git symbolic-ref HEAD refs/heads/main
+          echo hello > hello.txt; git add hello.txt; git commit -m initial
+          git rev-parse HEAD > "$T/local-sha"
+          git switch -c scratch
+      - id: action
+        uses: .
+        with:
+          token: ${{ github.token }}
+          directory: ${{ runner.temp }}/gtp-token/work
+          branch: main
+          tries: "2"
+      - name: Assert auth header configured and push succeeded
+        run: |
+          T="$RUNNER_TEMP/gtp-token"
+          HDR="$(git -C "$T/work" config --local --get http.https://github.com/.extraheader || true)"
+          if [ -z "$HDR" ]; then
+            echo "FAIL: extraheader not configured"
+            exit 1
+          fi
+          case "$HDR" in
+            "AUTHORIZATION: basic "*) echo "header prefix ok" ;;
+            *) echo "FAIL: unexpected header format"; exit 1 ;;
+          esac
+          REMOTE_SHA="$(git --git-dir="$T/remote.git" rev-parse main)"
+          if [ "$REMOTE_SHA" != "$(cat "$T/local-sha")" ]; then
+            echo "FAIL: remote main ($REMOTE_SHA) does not match local commit"
+            exit 1
+          fi
+          echo "PASS"
