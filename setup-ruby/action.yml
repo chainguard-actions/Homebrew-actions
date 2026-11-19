@@ -164,7 +164,7 @@ runs:
     - name: Cache Bundler gems
       if: inputs.bundler-cache == 'true'
       id: bundler-cache
-      uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      uses: chainguard-actions/actions-cache@46c2783c2418d3de33490be27a0d86c6268bc4fd # v6.1.0
       with:
         path: ${{ steps.bundler-cache-config.outputs.bundle-path }}
         key: ${{ steps.bundler-cache-config.outputs.cache-key }}
