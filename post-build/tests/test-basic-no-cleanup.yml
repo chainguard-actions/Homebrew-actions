@@ -1,0 +1,63 @@
+name: Test basic post-build without cleanup
+on:
+  workflow_dispatch:
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - name: Prepare bottles and logs directories
+        run: |
+          set -e
+          rm -rf bottles-test logs-test
+          mkdir -p bottles-test/failed bottles-test/logs bottles-test/home bottles-test/artifact-cache logs-test
+          echo '{}' > bottles-test/foo--1.0.x86_64_linux.bottle.json
+          echo 'bottle' > bottles-test/foo--1.0.x86_64_linux.bottle.tar.gz
+          echo '{}' > bottles-test/failed/bar--2.0.json
+          echo 'log' > bottles-test/logs/test.log
+          echo 'h' > bottles-test/home/file
+          echo 'c' > bottles-test/artifact-cache/file
+          echo 'dep' > bottles-test/tested-dependents-linux.txt
+          echo 'skip' > bottles-test/skipped_or_failed_formulae-linux.txt
+          echo 'steps' > bottles-test/steps_output.txt
+          echo 'log' > logs-test/build.log
+      - id: action
+        uses: .
+        continue-on-error: true
+        with:
+          bottles-directory: bottles-test
+          logs-directory: logs-test
+          runner: ubuntu-test
+          cleanup: "false"
+          upload-bottles: "true"
+      - name: Assert unneeded files deleted and bottles kept
+        env:
+          OUTCOME: ${{ steps.action.outcome }}
+        run: |
+          echo "outcome: $OUTCOME"
+          ls -la bottles-test || true
+          if [ "$OUTCOME" != "success" ] && [ "$OUTCOME" != "failure" ]; then
+            echo "FAIL: unexpected outcome '$OUTCOME'"
+            exit 1
+          fi
+          if [ ! -d bottles-test ]; then
+            echo "FAIL: bottles directory removed although cleanup=false"
+            exit 1
+          fi
+          for p in logs home failed artifact-cache tested-dependents-linux.txt; do
+            if [ -e "bottles-test/$p" ]; then
+              echo "FAIL: bottles-test/$p should have been deleted"
+              exit 1
+            fi
+          done
+          for p in foo--1.0.x86_64_linux.bottle.json foo--1.0.x86_64_linux.bottle.tar.gz skipped_or_failed_formulae-linux.txt; do
+            if [ ! -f "bottles-test/$p" ]; then
+              echo "FAIL: bottles-test/$p should have been kept"
+              exit 1
+            fi
+          done
+          if [ ! -f logs-test/build.log ]; then
+            echo "FAIL: logs directory should be untouched"
+            exit 1
+          fi
+          echo "PASS"

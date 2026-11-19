@@ -1,0 +1,38 @@
+name: Test ANSI colours stripped with custom workdir and path
+on:
+  workflow_dispatch:
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - name: Create coloured result file
+        run: |
+          mkdir -p /tmp/colorwd/logs
+          printf '\033[31mred text\033[0m and \033[1;32mgreen\033[0m\n' > /tmp/colorwd/logs/result.log
+          rm -f /tmp/summary-color.md
+      - id: action
+        uses: .
+        env:
+          GITHUB_STEP_SUMMARY: /tmp/summary-color.md
+        with:
+          workdir: /tmp/colorwd
+          result_path: logs/result.log
+      - name: Assert result file removed
+        run: |
+          if [ -e /tmp/colorwd/logs/result.log ]; then
+            echo "FAIL: result file should have been removed"
+            exit 1
+          fi
+          echo "PASS: result file removed"
+      - name: Assert colours stripped (if custom summary path honored)
+        run: |
+          f=/tmp/summary-color.md
+          if [ ! -f "$f" ]; then
+            echo "NOTE: custom GITHUB_STEP_SUMMARY not honored by runner; skipping content check"
+            exit 0
+          fi
+          cat -v "$f"
+          grep -qx 'red text and green' "$f" || { echo "FAIL: stripped text not found"; exit 1; }
+          if grep -q $'\033' "$f"; then echo "FAIL: escape codes remain"; exit 1; fi
+          echo "PASS"

@@ -1,0 +1,60 @@
+name: Test force push without lease
+on:
+  workflow_dispatch:
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - name: Set up diverged remote
+        run: |
+          set -e
+          rm -rf /tmp/gtp && mkdir -p /tmp/gtp
+          git init --bare -q /tmp/gtp/remote.git
+          git -C /tmp/gtp/remote.git symbolic-ref HEAD refs/heads/main
+          git init -q /tmp/gtp/work
+          cd /tmp/gtp/work
+          git checkout -q -b main
+          git config user.email "test@example.com"
+          git config user.name "Test User"
+          echo one > file.txt
+          git add file.txt
+          git commit -q -m "initial"
+          git remote add origin /tmp/gtp/remote.git
+          git push -q origin main
+          git clone -q /tmp/gtp/remote.git /tmp/gtp/other
+          cd /tmp/gtp/other
+          git config user.email "other@example.com"
+          git config user.name "Other User"
+          echo other > file.txt
+          git commit -q -am "other conflicting commit"
+          git push -q origin main
+          git rev-parse HEAD > /tmp/gtp/other-sha
+          cd /tmp/gtp/work
+          echo local > file.txt
+          git commit -q -am "local commit"
+      - id: action
+        uses: .
+        with:
+          directory: /tmp/gtp/work
+          branch: main
+          tries: "2"
+          force: "true"
+          no_lease: "true"
+      - name: Assert remote was overwritten by local
+        run: |
+          LOCAL=$(git -C /tmp/gtp/work rev-parse main)
+          REMOTE=$(git -C /tmp/gtp/remote.git rev-parse refs/heads/main)
+          OTHER=$(cat /tmp/gtp/other-sha)
+          echo "local: $LOCAL"
+          echo "remote: $REMOTE"
+          echo "other: $OTHER"
+          if [ "$LOCAL" != "$REMOTE" ]; then
+            echo "FAIL: remote main was not force-updated to local"
+            exit 1
+          fi
+          if git -C /tmp/gtp/remote.git merge-base --is-ancestor "$OTHER" "$REMOTE"; then
+            echo "FAIL: other commit should have been overwritten"
+            exit 1
+          fi
+          echo "PASS"

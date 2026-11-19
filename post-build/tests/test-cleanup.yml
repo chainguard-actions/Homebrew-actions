@@ -1,0 +1,61 @@
+name: Test post-build with cleanup
+on:
+  workflow_dispatch:
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - name: Install fake brew on PATH
+        run: |
+          set -e
+          mkdir -p /tmp/fake-brew-bin
+          cat > /tmp/fake-brew-bin/brew <<'EOF'
+          #!/bin/sh
+          echo "fake brew $* HOMEBREW_DEVELOPER=$HOMEBREW_DEVELOPER" >> /tmp/fake-brew-calls.log
+          exit 0
+          EOF
+          chmod +x /tmp/fake-brew-bin/brew
+          rm -f /tmp/fake-brew-calls.log
+          echo "/tmp/fake-brew-bin" >> "$GITHUB_PATH"
+      - name: Prepare bottles and logs directories
+        run: |
+          set -e
+          rm -rf bottles-clean logs-clean
+          mkdir -p bottles-clean/logs logs-clean
+          echo '{}' > bottles-clean/foo--1.0.x86_64_linux.bottle.json
+          echo 'log' > bottles-clean/logs/test.log
+          echo 'log' > logs-clean/build.log
+      - id: action
+        uses: .
+        continue-on-error: true
+        with:
+          bottles-directory: bottles-clean
+          logs-directory: logs-clean
+          runner: ubuntu-cleanup
+          cleanup: "true"
+          upload-bottles: "false"
+      - name: Assert cleanup ran
+        env:
+          OUTCOME: ${{ steps.action.outcome }}
+        run: |
+          echo "outcome: $OUTCOME"
+          cat /tmp/fake-brew-calls.log || true
+          if [ "$OUTCOME" != "success" ] && [ "$OUTCOME" != "failure" ]; then
+            echo "FAIL: unexpected outcome '$OUTCOME'"
+            exit 1
+          fi
+          if ! grep -q -- "test-bot --only-cleanup-after" /tmp/fake-brew-calls.log; then
+            echo "FAIL: brew test-bot --only-cleanup-after was not invoked"
+            exit 1
+          fi
+          if ! grep -q "HOMEBREW_DEVELOPER=1" /tmp/fake-brew-calls.log; then
+            echo "FAIL: HOMEBREW_DEVELOPER=1 not set for cleanup"
+            exit 1
+          fi
+          if [ -e bottles-clean ]; then
+            echo "FAIL: bottles directory should have been removed"
+            ls -la bottles-clean
+            exit 1
+          fi
+          echo "PASS"

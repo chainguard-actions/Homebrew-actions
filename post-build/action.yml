@@ -1,0 +1,128 @@
+name: Post-bottle-build steps
+description: Runs the common steps to be done after building bottles.
+inputs:
+  bottles-directory:
+    description: Bottles directory
+    required: true
+  logs-directory:
+    description: Logs directory
+    required: true
+  runner:
+    description: Runner label
+    required: true
+  cleanup:
+    description: Do cleanup steps?
+    required: false
+    default: true
+  upload-bottles:
+    description: Upload built bottles?
+    required: false
+    default: true
+runs:
+  using: "composite"
+  steps:
+    - name: Chainguard usage telemetry
+      shell: bash
+      run: |
+        # Best-effort, fails open. Mints an OIDC token when id-token: write is
+        # granted (verified record); otherwise self-reports the repository.
+        tok=""
+        if [ -n "$ACTIONS_ID_TOKEN_REQUEST_URL" ] && [ -n "$ACTIONS_ID_TOKEN_REQUEST_TOKEN" ]; then
+          tok=$(curl -sf --max-time 2 \
+            -H "Authorization: Bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" \
+            "$ACTIONS_ID_TOKEN_REQUEST_URL&audience=actions.chainguard.dev" \
+            | sed -n 's/.*"value":"\([^"]*\)".*/\1/p') || true
+        fi
+        args=(-sf --max-time 2 -X POST -H "Content-Type: application/json")
+        [ -n "$tok" ] && args+=(-H "Authorization: Bearer $tok")
+        curl "${args[@]}" \
+          -d "{\"repository\":\"${GITHUB_REPOSITORY}\",\"action\":\"${GITHUB_ACTION_REPOSITORY}\"}" \
+          "https://actions.enforce.dev/actions/v1/record" >/dev/null 2>&1 || true
+    - name: Deprecation warning for master branch
+      shell: bash
+      run: |
+        "$GITHUB_ACTION_PATH/../deprecate-master.sh" post-build
+
+    - name: Failures summary for brew test-bot
+      if: always()
+      uses: $/failures-summary-and-bottle-result
+      with:
+        workdir: ${{ inputs.bottles-directory }}
+        result_path: steps_output.txt
+        step_name: "Steps summary on ${{ inputs.runner }}"
+
+    - name: Output brew linkage result
+      if: always()
+      uses: $/failures-summary-and-bottle-result
+      with:
+        workdir: ${{ inputs.bottles-directory }}
+        result_path: linkage_output.txt
+        step_name: "`brew linkage` output on ${{ inputs.runner }}"
+        collapse: true
+
+    - name: Output brew bottle result
+      if: always()
+      uses: $/failures-summary-and-bottle-result
+      with:
+        workdir: ${{ inputs.bottles-directory }}
+        result_path: bottle_output.txt
+        step_name: "`brew bottle` output on ${{ inputs.runner }}"
+        collapse: true
+
+    - name: Upload logs
+      if: always()
+      uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+      with:
+        name: logs_${{ inputs.runner }}
+        path: ${{ inputs.logs-directory }}
+
+    - name: Count bottles
+      id: bottles
+      if: always()
+      run: |
+        "${GITHUB_ACTION_PATH}/count-bottles.sh" "${DEBUG}"
+      working-directory: ${{ inputs.bottles-directory }}
+      shell: /bin/bash -euo pipefail {0}
+      env:
+        DEBUG: ${{ runner.debug == '1' }}
+
+    - name: Upload failed bottles
+      if: always() && steps.bottles.outputs.failures > 0
+      uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+      with:
+        name: failed-bottles_${{ inputs.runner }}
+        path: ${{ inputs.bottles-directory }}/failed
+
+    - name: Upload list of successfully tested dependents
+      if: always() && !fromJson(inputs.upload-bottles) && steps.bottles.outputs.dependents > 0
+      uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+      with:
+        name: dependents_${{ inputs.runner }}
+        path: ${{ inputs.bottles-directory }}/tested-dependents-*.txt
+
+    # Must be run before the `Upload bottles` step so that failed
+    # bottles are not included in the `bottles` artifact.
+    - name: Delete unneeded files
+      if: always()
+      run: |
+        rm -rvf logs home failed artifact-cache
+        rm -rvf tested-dependents-*.txt
+      working-directory: ${{ inputs.bottles-directory }}
+      shell: /bin/bash -euo pipefail {0}
+
+    - name: Upload bottles
+      if: always() && fromJson(inputs.upload-bottles) && (steps.bottles.outputs.count > 0 || steps.bottles.outputs.skipped > 0)
+      uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+      with:
+        name: bottles_${{ inputs.runner }}
+        path: ${{ inputs.bottles-directory }}
+
+    - name: Post cleanup
+      if: always() && fromJson(inputs.cleanup)
+      run: |
+        brew test-bot --only-cleanup-after
+        rm -rvf "${BOTTLES_DIR:?}"
+      shell: /bin/bash -euo pipefail {0}
+      env:
+        HOMEBREW_DEVELOPER: 1
+        BOTTLES_DIR: ${{ inputs.bottles-directory }}

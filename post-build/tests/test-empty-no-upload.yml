@@ -1,0 +1,48 @@
+name: Test post-build with empty bottles directory and no upload
+on:
+  workflow_dispatch:
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - name: Prepare empty directories with only dependents list
+        run: |
+          set -e
+          rm -rf bottles-empty logs-empty
+          mkdir -p bottles-empty logs-empty
+          echo 'dep' > bottles-empty/tested-dependents-a.txt
+          echo 'dep' > bottles-empty/tested-dependents-b.txt
+          echo 'keep' > bottles-empty/README.txt
+      - id: action
+        uses: .
+        continue-on-error: true
+        with:
+          bottles-directory: bottles-empty
+          logs-directory: logs-empty
+          runner: ubuntu-empty
+          cleanup: "false"
+          upload-bottles: "false"
+      - name: Assert dependents lists deleted, other files kept
+        env:
+          OUTCOME: ${{ steps.action.outcome }}
+        run: |
+          echo "outcome: $OUTCOME"
+          ls -la bottles-empty || true
+          if [ "$OUTCOME" != "success" ] && [ "$OUTCOME" != "failure" ]; then
+            echo "FAIL: unexpected outcome '$OUTCOME'"
+            exit 1
+          fi
+          if [ ! -d bottles-empty ]; then
+            echo "FAIL: bottles directory removed although cleanup=false"
+            exit 1
+          fi
+          if ls bottles-empty/tested-dependents-*.txt >/dev/null 2>&1; then
+            echo "FAIL: tested-dependents lists should have been deleted"
+            exit 1
+          fi
+          if [ ! -f bottles-empty/README.txt ]; then
+            echo "FAIL: unrelated file should be kept"
+            exit 1
+          fi
+          echo "PASS"

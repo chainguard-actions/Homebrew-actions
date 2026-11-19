@@ -1,0 +1,78 @@
+name: Test basic usage
+on:
+  workflow_dispatch:
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - id: action
+        uses: .
+      - name: Assert gems-path output
+        env:
+          ACTUAL: ${{ steps.action.outputs.gems-path }}
+        run: |
+          echo "actual: $ACTUAL"
+          case "$ACTUAL" in
+            */Library/Homebrew/vendor/bundle/ruby/) echo "PASS" ;;
+            *) echo "FAIL: unexpected gems-path"; exit 1 ;;
+          esac
+      - name: Assert gems-hash output is a sha256
+        env:
+          ACTUAL: ${{ steps.action.outputs.gems-hash }}
+        run: |
+          echo "actual: $ACTUAL"
+          if ! echo "$ACTUAL" | grep -qE '^[0-9a-f]{64}$'; then
+            echo "FAIL: gems-hash is not a sha256 hex digest"
+            exit 1
+          fi
+          echo "PASS"
+      - name: Assert tap outputs are empty for a non-tap repository
+        env:
+          REPO_PATH: ${{ steps.action.outputs.repository-path }}
+          TAP_NAME: ${{ steps.action.outputs.tap-name }}
+        run: |
+          echo "repository-path: '$REPO_PATH'"
+          echo "tap-name: '$TAP_NAME'"
+          if [ -n "$TAP_NAME" ] || [ -n "$REPO_PATH" ]; then
+            echo "FAIL: expected empty tap outputs"
+            exit 1
+          fi
+          echo "PASS"
+      - name: Assert brew is installed and usable
+        run: |
+          export PATH="/home/linuxbrew/.linuxbrew/bin:/home/linuxbrew/.linuxbrew/sbin:/opt/homebrew/bin:/usr/local/bin:$PATH"
+          if ! command -v brew >/dev/null; then
+            echo "FAIL: brew not found"
+            exit 1
+          fi
+          brew --version
+          echo "PASS"
+      - name: Assert stable (auto) env and API token env are set
+        run: |
+          echo "HOMEBREW_UPDATE_TO_TAG='${HOMEBREW_UPDATE_TO_TAG:-}'"
+          if [ "${HOMEBREW_UPDATE_TO_TAG:-}" != "1" ]; then
+            echo "FAIL: expected HOMEBREW_UPDATE_TO_TAG=1 for non-tap repo with stable=auto"
+            exit 1
+          fi
+          if [ -z "${HOMEBREW_GITHUB_API_TOKEN:-}" ]; then
+            echo "FAIL: expected HOMEBREW_GITHUB_API_TOKEN to be exported"
+            exit 1
+          fi
+          if [ -n "${HOMEBREW_DEBUG:-}" ]; then
+            echo "FAIL: HOMEBREW_DEBUG should not be set when debug is off"
+            exit 1
+          fi
+          echo "PASS"
+      - name: Assert brew repository is on stable branch
+        run: |
+          export PATH="/home/linuxbrew/.linuxbrew/bin:/opt/homebrew/bin:/usr/local/bin:$PATH"
+          REPO="$(brew --repo)"
+          git config --global --add safe.directory "$REPO" || true
+          BRANCH="$(git -C "$REPO" symbolic-ref --short HEAD)"
+          echo "branch: $BRANCH"
+          if [ "$BRANCH" != "stable" ]; then
+            echo "FAIL: expected brew repository on 'stable' branch"
+            exit 1
+          fi
+          echo "PASS"

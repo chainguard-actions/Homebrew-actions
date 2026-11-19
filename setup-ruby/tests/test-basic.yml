@@ -1,0 +1,67 @@
+name: Test basic usage (Homebrew Ruby formula)
+on:
+  workflow_dispatch:
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - name: Detect Homebrew availability
+        id: brew
+        shell: bash
+        run: |
+          if command -v brew >/dev/null 2>&1; then
+            echo "available=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "available=false" >> "$GITHUB_OUTPUT"
+          fi
+      - id: action
+        uses: .
+        continue-on-error: true
+      - name: Assert outcome matches Homebrew availability
+        shell: bash
+        env:
+          BREW: ${{ steps.brew.outputs.available }}
+          OUTCOME: ${{ steps.action.outcome }}
+          RUBY_PATH: ${{ steps.action.outputs.ruby-path }}
+          RUBY_PREFIX: ${{ steps.action.outputs.ruby-prefix }}
+          RUBY_VERSION_OUT: ${{ steps.action.outputs.ruby-version }}
+        run: |
+          echo "brew available: $BREW"
+          echo "outcome: $OUTCOME"
+          echo "ruby-path: $RUBY_PATH"
+          echo "ruby-prefix: $RUBY_PREFIX"
+          echo "ruby-version: $RUBY_VERSION_OUT"
+          if [ "$BREW" = "true" ]; then
+            if [ "$OUTCOME" != "success" ]; then
+              echo "FAIL: brew is available but action did not succeed"
+              exit 1
+            fi
+            case "$RUBY_PATH" in
+              */bin/ruby) ;;
+              *) echo "FAIL: ruby-path should end with /bin/ruby"; exit 1 ;;
+            esac
+            if [ ! -x "$RUBY_PATH" ]; then
+              echo "FAIL: ruby-path is not executable"
+              exit 1
+            fi
+            if [ "$RUBY_PREFIX/bin/ruby" != "$RUBY_PATH" ]; then
+              echo "FAIL: ruby-prefix inconsistent with ruby-path"
+              exit 1
+            fi
+            if ! echo "$RUBY_VERSION_OUT" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+'; then
+              echo "FAIL: ruby-version is not a version string"
+              exit 1
+            fi
+            echo "PASS: Ruby set up via Homebrew"
+          else
+            if [ "$OUTCOME" != "failure" ]; then
+              echo "FAIL: expected failure when Homebrew is missing, got '$OUTCOME'"
+              exit 1
+            fi
+            if [ -n "$RUBY_PATH" ]; then
+              echo "FAIL: ruby-path should be empty when Homebrew is missing"
+              exit 1
+            fi
+            echo "PASS: action failed as expected without Homebrew"
+          fi

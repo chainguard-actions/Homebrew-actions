@@ -1,0 +1,36 @@
+name: Test uninstall of existing formulae
+on:
+  workflow_dispatch:
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - name: Set up fake Homebrew with a preinstalled formula
+        run: bash "$GITHUB_WORKSPACE/tests/fixtures/setup-fake-brew.sh" oldpkg
+      - id: action
+        uses: .
+        with:
+          install: jq
+          uninstall: "true"
+          workflow-key: act-uninstall
+      - name: Assert cleanup then install
+        env:
+          CACHE_KEY: ${{ steps.action.outputs.cache-key }}
+        run: |
+          echo "cache-key: $CACHE_KEY"
+          echo "--- brew log ---"; cat "$FAKE_BREW_ROOT/log"
+          if ! grep -qx "brew test-bot --only-cleanup-before" "$FAKE_BREW_ROOT/log"; then
+            echo "FAIL: brew test-bot cleanup not invoked"; exit 1
+          fi
+          if ! grep -qx "brew install --formula jq" "$FAKE_BREW_ROOT/log"; then
+            echo "FAIL: brew install jq not invoked"; exit 1
+          fi
+          if grep -qx "oldpkg" "$FAKE_BREW_ROOT/installed"; then
+            echo "FAIL: oldpkg should have been removed"; exit 1
+          fi
+          expected_hash="$(printf 'jq 1.7.1 0\n' | sha256sum | cut -d' ' -f1)"
+          if [ "$CACHE_KEY" != "$expected_hash" ]; then
+            echo "FAIL: cache-key expected $expected_hash"; exit 1
+          fi
+          echo "PASS"

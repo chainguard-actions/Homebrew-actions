@@ -1,0 +1,47 @@
+name: Test formulae and casks together
+on:
+  workflow_dispatch:
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - name: Ensure deprecate-master.sh exists next to the action
+        run: |
+          p="$(dirname "$GITHUB_WORKSPACE")/deprecate-master.sh"
+          if [ ! -f "$p" ]; then
+            printf '#!/bin/sh\necho "deprecate-master stub: $*"\nexit 0\n' > "$p" || sudo sh -c "printf '#!/bin/sh\nexit 0\n' > '$p'"
+          fi
+          chmod +x "$p" 2>/dev/null || sudo chmod +x "$p"
+      - name: Install mock brew
+        run: |
+          mkdir -p /tmp/mockbin
+          cat > /tmp/mockbin/brew <<'EOF'
+          #!/bin/bash
+          echo "$*" >> /tmp/brew-calls.log
+          exit 0
+          EOF
+          chmod +x /tmp/mockbin/brew
+          rm -f /tmp/brew-calls.log
+          echo "/tmp/mockbin" >> "$GITHUB_PATH"
+      - id: action
+        uses: .
+        with:
+          token: ${{ github.token }}
+          formulae: homebrew/core/wget
+          casks: firefox
+          fork: 'false'
+      - name: Assert brew invoked twice with expected args
+        run: |
+          cat /tmp/brew-calls.log || true
+          LINE1="$(sed -n 1p /tmp/brew-calls.log)"
+          LINE2="$(sed -n 2p /tmp/brew-calls.log)"
+          COUNT="$(wc -l < /tmp/brew-calls.log)"
+          if [ "$COUNT" -ne 2 ]; then echo "FAIL: expected 2 brew calls, got $COUNT"; exit 1; fi
+          if [ "$LINE1" != "bump --no-fork --full-name --open-pr --formulae homebrew/core/wget" ]; then
+            echo "FAIL: unexpected formulae call: '$LINE1'"; exit 1
+          fi
+          if [ "$LINE2" != "bump --no-fork --open-pr --casks firefox" ]; then
+            echo "FAIL: unexpected casks call: '$LINE2'"; exit 1
+          fi
+          echo "PASS"

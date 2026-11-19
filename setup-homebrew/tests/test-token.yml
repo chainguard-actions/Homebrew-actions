@@ -1,0 +1,33 @@
+name: Test token configures git auth header
+on:
+  workflow_dispatch:
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - id: action
+        uses: .
+        with:
+          token: ${{ github.token }}
+      - name: Assert git extraheader configured
+        run: |
+          HEADER="$(git config --global --get "http.${GITHUB_SERVER_URL}/.extraheader" || true)"
+          if [ -z "$HEADER" ]; then
+            echo "FAIL: expected http.${GITHUB_SERVER_URL}/.extraheader to be set"
+            exit 1
+          fi
+          case "$HEADER" in
+            "Authorization: basic "*) echo "PASS: auth header configured" ;;
+            *) echo "FAIL: unexpected header format"; exit 1 ;;
+          esac
+      - name: Assert gems-hash output set
+        env:
+          ACTUAL: ${{ steps.action.outputs.gems-hash }}
+        run: |
+          echo "actual: $ACTUAL"
+          if ! echo "$ACTUAL" | grep -qE '^[0-9a-f]{64}$'; then
+            echo "FAIL: gems-hash is not a sha256 hex digest"
+            exit 1
+          fi
+          echo "PASS"

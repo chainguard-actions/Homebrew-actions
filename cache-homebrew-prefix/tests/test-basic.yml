@@ -1,0 +1,48 @@
+name: Test basic install
+on:
+  workflow_dispatch:
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - name: Set up fake Homebrew
+        run: bash "$GITHUB_WORKSPACE/tests/fixtures/setup-fake-brew.sh"
+      - id: action
+        uses: .
+        with:
+          install: jq wget
+          workflow-key: act-basic
+      - name: Assert outputs and install
+        env:
+          PREFIX: ${{ steps.action.outputs.prefix }}
+          CACHE_PREFIX: ${{ steps.action.outputs.cache-prefix }}
+          CACHE_KEY: ${{ steps.action.outputs.cache-key }}
+        run: |
+          echo "prefix: $PREFIX"
+          echo "cache-prefix: $CACHE_PREFIX"
+          echo "cache-key: $CACHE_KEY"
+          echo "--- brew log ---"; cat "$FAKE_BREW_ROOT/log"
+          fail=0
+          if [ "$PREFIX" != "$FAKE_BREW_ROOT/prefix" ]; then
+            echo "FAIL: prefix expected $FAKE_BREW_ROOT/prefix"; fail=1
+          fi
+          arch="$(uname -m)"
+          if [ -r /etc/os-release ]; then
+            . /etc/os-release
+            expected="${ID:-linux}-${VERSION_ID:-unknown}-${arch}-act-basic"
+          else
+            expected="linux-unknown-${arch}-act-basic"
+          fi
+          if [ "$CACHE_PREFIX" != "$expected" ]; then
+            echo "FAIL: cache-prefix expected $expected"; fail=1
+          fi
+          expected_hash="$(printf 'jq 1.7.1 0\nwget 1.24.5 1\n' | sha256sum | cut -d' ' -f1)"
+          if [ "$CACHE_KEY" != "$expected_hash" ]; then
+            echo "FAIL: cache-key expected $expected_hash"; fail=1
+          fi
+          if ! grep -qx "brew install --formula jq wget" "$FAKE_BREW_ROOT/log"; then
+            echo "FAIL: brew install not invoked with jq wget"; fail=1
+          fi
+          [ "$fail" = 0 ] || exit 1
+          echo "PASS"

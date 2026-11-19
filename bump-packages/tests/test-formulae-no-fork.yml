@@ -1,0 +1,46 @@
+name: Test formulae bump without fork
+on:
+  workflow_dispatch:
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - name: Ensure deprecate-master.sh exists next to the action
+        run: |
+          p="$(dirname "$GITHUB_WORKSPACE")/deprecate-master.sh"
+          if [ ! -f "$p" ]; then
+            printf '#!/bin/sh\necho "deprecate-master stub: $*"\nexit 0\n' > "$p" || sudo sh -c "printf '#!/bin/sh\nexit 0\n' > '$p'"
+          fi
+          chmod +x "$p" 2>/dev/null || sudo chmod +x "$p"
+      - name: Install mock brew
+        run: |
+          mkdir -p /tmp/mockbin
+          cat > /tmp/mockbin/brew <<'EOF'
+          #!/bin/bash
+          echo "$*" >> /tmp/brew-calls.log
+          echo "HOMEBREW_DEVELOPER=${HOMEBREW_DEVELOPER}" >> /tmp/brew-env.log
+          if [ -n "${HOMEBREW_GITHUB_API_TOKEN}" ]; then echo "TOKEN=set" >> /tmp/brew-env.log; fi
+          exit 0
+          EOF
+          chmod +x /tmp/mockbin/brew
+          rm -f /tmp/brew-calls.log /tmp/brew-env.log
+          echo "/tmp/mockbin" >> "$GITHUB_PATH"
+      - id: action
+        uses: .
+        with:
+          token: ${{ github.token }}
+          formulae: wget curl
+          fork: 'false'
+      - name: Assert brew invoked with expected args
+        run: |
+          cat /tmp/brew-calls.log || true
+          cat /tmp/brew-env.log || true
+          ACTUAL="$(cat /tmp/brew-calls.log)"
+          if [ "$ACTUAL" != "bump --no-fork --open-pr --formulae wget curl" ]; then
+            echo "FAIL: unexpected brew args: '$ACTUAL'"
+            exit 1
+          fi
+          grep -qx "HOMEBREW_DEVELOPER=1" /tmp/brew-env.log || { echo "FAIL: HOMEBREW_DEVELOPER not 1"; exit 1; }
+          grep -qx "TOKEN=set" /tmp/brew-env.log || { echo "FAIL: token not passed"; exit 1; }
+          echo "PASS"

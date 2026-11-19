@@ -1,0 +1,37 @@
+name: Test Brewfile install
+on:
+  workflow_dispatch:
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - name: Set up fake Homebrew and Brewfile
+        run: |
+          bash "$GITHUB_WORKSPACE/tests/fixtures/setup-fake-brew.sh"
+          printf 'brew "wget"\nbrew "jq"\n' > "$GITHUB_WORKSPACE/Brewfile"
+      - id: action
+        uses: .
+        with:
+          brewfile: "true"
+          workflow-key: act-brewfile
+      - name: Assert Brewfile was used
+        env:
+          CACHE_KEY: ${{ steps.action.outputs.cache-key }}
+        run: |
+          echo "cache-key: $CACHE_KEY"
+          echo "--- brew log ---"; cat "$FAKE_BREW_ROOT/log"
+          expected_hash="$(printf 'jq 1.7.1 0\nwget 1.24.5 1\n' | sha256sum | cut -d' ' -f1)"
+          if [ "$CACHE_KEY" != "$expected_hash" ]; then
+            echo "FAIL: cache-key expected $expected_hash"; exit 1
+          fi
+          if ! grep -qx "brew bundle --file Brewfile" "$FAKE_BREW_ROOT/log"; then
+            echo "FAIL: brew bundle --file Brewfile not invoked"; exit 1
+          fi
+          if grep -q "^brew install" "$FAKE_BREW_ROOT/log"; then
+            echo "FAIL: brew install should not be used with brewfile"; exit 1
+          fi
+          echo "PASS"
+      - name: Clean up Brewfile
+        if: always()
+        run: rm -f "$GITHUB_WORKSPACE/Brewfile"

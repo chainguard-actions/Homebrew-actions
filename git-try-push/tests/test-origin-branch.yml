@@ -1,0 +1,75 @@
+name: Test rebase on a different origin_branch
+on:
+  workflow_dispatch:
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - name: Set up bare remote with diverged branches
+        run: |
+          set -e
+          rm -rf /tmp/gtpo && mkdir -p /tmp/gtpo
+          git init --bare -q /tmp/gtpo/remote.git
+          git -C /tmp/gtpo/remote.git symbolic-ref HEAD refs/heads/main
+          # Seed clone: create A, then published = A+C, upstream = A+C+D
+          git init -q /tmp/gtpo/seed
+          cd /tmp/gtpo/seed
+          git checkout -q -b main
+          git config user.email "test@example.com"
+          git config user.name "Test User"
+          echo a > a.txt && git add a.txt && git commit -q -m "A"
+          git remote add origin /tmp/gtpo/remote.git
+          git push -q origin main
+          # Work clone at A
+          git clone -q /tmp/gtpo/remote.git /tmp/gtpo/work
+          git -C /tmp/gtpo/work config user.email "test@example.com"
+          git -C /tmp/gtpo/work config user.name "Test User"
+          # Advance remote
+          echo c > c.txt && git add c.txt && git commit -q -m "C"
+          git push -q origin main:published
+          echo d > d.txt && git add d.txt && git commit -q -m "D"
+          git push -q origin main:upstream
+          git rev-parse HEAD > /tmp/gtpo/upstream-sha
+          # Work clone: local feature commit on top of A
+          cd /tmp/gtpo/work
+          git checkout -q -b feature
+          echo f > f.txt && git add f.txt && git commit -q -m "F"
+          git checkout -q main
+      - id: action
+        uses: .
+        with:
+          directory: /tmp/gtpo/work
+          branch: feature
+          remote_branch: published
+          origin_branch: upstream
+          tries: "3"
+      - name: Assert feature was rebased on upstream and pushed to published
+        run: |
+          set -e
+          UPSTREAM=$(cat /tmp/gtpo/upstream-sha)
+          PUB=$(git -C /tmp/gtpo/remote.git rev-parse refs/heads/published)
+          LOCAL=$(git -C /tmp/gtpo/work rev-parse feature)
+          REMOTE_UP=$(git -C /tmp/gtpo/remote.git rev-parse refs/heads/upstream)
+          echo "upstream: $UPSTREAM (remote now $REMOTE_UP)"
+          echo "published: $PUB"
+          echo "local feature: $LOCAL"
+          if [ "$PUB" != "$LOCAL" ]; then
+            echo "FAIL: remote published does not match local feature"
+            exit 1
+          fi
+          if ! git -C /tmp/gtpo/remote.git merge-base --is-ancestor "$UPSTREAM" "$PUB"; then
+            echo "FAIL: published was not rebased on origin_branch 'upstream'"
+            exit 1
+          fi
+          if [ "$REMOTE_UP" != "$UPSTREAM" ]; then
+            echo "FAIL: remote upstream branch changed unexpectedly"
+            exit 1
+          fi
+          MSG=$(git -C /tmp/gtpo/remote.git log -1 --format=%s "$PUB")
+          echo "top commit: $MSG"
+          if [ "$MSG" != "F" ]; then
+            echo "FAIL: expected feature commit F on top"
+            exit 1
+          fi
+          echo "PASS"

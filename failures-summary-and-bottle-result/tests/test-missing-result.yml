@@ -1,0 +1,45 @@
+name: Test missing or empty result file is a no-op
+on:
+  workflow_dispatch:
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - name: Prepare empty result file in custom workdir
+        run: |
+          mkdir -p /tmp/emptywd/out
+          : > /tmp/emptywd/out/empty.txt
+          rm -f /tmp/summary-missing.md
+      - id: missing
+        uses: .
+        env:
+          GITHUB_STEP_SUMMARY: /tmp/summary-missing.md
+        with:
+          workdir: /tmp/does-not-exist
+          result_path: nothing.txt
+      - id: empty
+        uses: .
+        env:
+          GITHUB_STEP_SUMMARY: /tmp/summary-missing.md
+        with:
+          workdir: /tmp/emptywd
+          result_path: out/empty.txt
+      - name: Assert outcomes
+        env:
+          O1: ${{ steps.missing.outcome }}
+          O2: ${{ steps.empty.outcome }}
+        run: |
+          echo "missing: $O1 empty: $O2"
+          [ "$O1" = "success" ] || { echo "FAIL: missing file step failed"; exit 1; }
+          [ "$O2" = "success" ] || { echo "FAIL: empty file step failed"; exit 1; }
+          if [ ! -e /tmp/emptywd/out/empty.txt ]; then
+            echo "FAIL: empty file should not be removed (action exits early)"
+            exit 1
+          fi
+          if [ -f /tmp/summary-missing.md ] && grep -q '###' /tmp/summary-missing.md; then
+            echo "FAIL: summary should not have been written"
+            cat /tmp/summary-missing.md
+            exit 1
+          fi
+          echo "PASS"

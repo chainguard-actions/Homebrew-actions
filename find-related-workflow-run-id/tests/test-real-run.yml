@@ -1,0 +1,52 @@
+name: Test finding a related run on a real public repository
+on:
+  workflow_dispatch:
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - name: Look up a real completed workflow run in Homebrew/actions
+        id: lookup
+        env:
+          TOKEN: ${{ github.token }}
+        run: |
+          set -u
+          resp="$(curl -sfL -H "Authorization: Bearer $TOKEN" -H "Accept: application/vnd.github+json" \
+            "https://api.github.com/repos/Homebrew/actions/actions/runs?per_page=1&status=completed" || true)"
+          run_id="$(echo "$resp" | jq -r '.workflow_runs[0].id // empty' 2>/dev/null || true)"
+          wf_name="$(echo "$resp" | jq -r '.workflow_runs[0].name // empty' 2>/dev/null || true)"
+          echo "run_id=$run_id"
+          echo "wf_name=$wf_name"
+          echo "run_id=$run_id" >> "$GITHUB_OUTPUT"
+          echo "wf_name=$wf_name" >> "$GITHUB_OUTPUT"
+      - id: action
+        if: steps.lookup.outputs.run_id != ''
+        uses: .
+        with:
+          run-id: ${{ steps.lookup.outputs.run_id }}
+          workflow-name: ${{ steps.lookup.outputs.wf_name }}
+          repository: Homebrew/actions
+      - name: Assert a numeric related run ID was returned
+        if: steps.lookup.outputs.run_id != ''
+        env:
+          OUTCOME: ${{ steps.action.outcome }}
+          RESULT: ${{ steps.action.outputs.workflow-run-id }}
+          ENV_RESULT: ${{ env.workflow_run_id }}
+        run: |
+          echo "outcome: $OUTCOME"
+          echo "output: $RESULT"
+          echo "env: $ENV_RESULT"
+          if [ "$OUTCOME" != "success" ]; then
+            echo "FAIL: expected success"
+            exit 1
+          fi
+          if ! echo "$RESULT" | grep -qE '^[0-9]+$'; then
+            echo "FAIL: output is not a numeric run ID"
+            exit 1
+          fi
+          if [ "$ENV_RESULT" != "$RESULT" ]; then
+            echo "FAIL: env.workflow_run_id does not match output"
+            exit 1
+          fi
+          echo "PASS"

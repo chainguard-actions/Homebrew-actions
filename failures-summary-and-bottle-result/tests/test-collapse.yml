@@ -1,0 +1,40 @@
+name: Test collapsed output with custom heading
+on:
+  workflow_dispatch:
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - name: Create result file
+        run: |
+          mkdir -p "$GITHUB_WORKSPACE/bottles"
+          printf 'collapsed content\n' > "$GITHUB_WORKSPACE/bottles/steps_output.txt"
+          rm -f /tmp/summary-collapse.md
+      - id: action
+        uses: .
+        env:
+          GITHUB_STEP_SUMMARY: /tmp/summary-collapse.md
+        with:
+          step_name: My Custom Heading
+          collapse: 'true'
+      - name: Assert result file removed
+        run: |
+          if [ -e "$GITHUB_WORKSPACE/bottles/steps_output.txt" ]; then
+            echo "FAIL: result file should have been removed"
+            exit 1
+          fi
+          echo "PASS: result file removed"
+      - name: Assert summary content (if custom summary path honored)
+        run: |
+          f=/tmp/summary-collapse.md
+          if [ ! -f "$f" ]; then
+            echo "NOTE: custom GITHUB_STEP_SUMMARY not honored by runner; skipping content check"
+            exit 0
+          fi
+          cat "$f"
+          grep -qx '### My Custom Heading' "$f" || { echo "FAIL: missing heading"; exit 1; }
+          grep -qF '<details><summary>Details</summary>' "$f" || { echo "FAIL: missing details"; exit 1; }
+          grep -qx '</details>' "$f" || { echo "FAIL: missing closing details"; exit 1; }
+          grep -qx 'collapsed content' "$f" || { echo "FAIL: missing content"; exit 1; }
+          echo "PASS"

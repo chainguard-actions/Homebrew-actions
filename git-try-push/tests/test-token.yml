@@ -1,0 +1,47 @@
+name: Test token configures auth header
+on:
+  workflow_dispatch:
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - name: Set up local bare remote and work clone
+        run: |
+          set -e
+          rm -rf /tmp/gtpt && mkdir -p /tmp/gtpt
+          git init --bare -q /tmp/gtpt/remote.git
+          git -C /tmp/gtpt/remote.git symbolic-ref HEAD refs/heads/main
+          git init -q /tmp/gtpt/work
+          cd /tmp/gtpt/work
+          git checkout -q -b main
+          git config user.email "test@example.com"
+          git config user.name "Test User"
+          echo one > file.txt
+          git add file.txt
+          git commit -q -m "initial"
+          git remote add origin /tmp/gtpt/remote.git
+      - id: action
+        uses: .
+        with:
+          directory: /tmp/gtpt/work
+          token: test-token-value
+          tries: "2"
+      - name: Assert extraheader configured and push succeeded
+        run: |
+          set -e
+          HDR=$(git -C /tmp/gtpt/work config --local --get http.https://github.com/.extraheader || true)
+          EXPECTED="AUTHORIZATION: basic $(printf 'x-access-token:test-token-value' | base64 -w0)"
+          echo "header present: $([ -n "$HDR" ] && echo yes || echo no)"
+          if [ "$HDR" != "$EXPECTED" ]; then
+            echo "FAIL: extraheader not set to expected basic auth value"
+            exit 1
+          fi
+          LOCAL=$(git -C /tmp/gtpt/work rev-parse main)
+          REMOTE=$(git -C /tmp/gtpt/remote.git rev-parse refs/heads/main)
+          echo "local: $LOCAL remote: $REMOTE"
+          if [ "$LOCAL" != "$REMOTE" ]; then
+            echo "FAIL: push did not happen"
+            exit 1
+          fi
+          echo "PASS"

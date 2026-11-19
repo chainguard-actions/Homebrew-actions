@@ -1,0 +1,41 @@
+name: Test stable disabled
+on:
+  workflow_dispatch:
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - id: action
+        uses: .
+        with:
+          stable: "false"
+      - name: Assert HOMEBREW_UPDATE_TO_TAG is not set
+        run: |
+          echo "HOMEBREW_UPDATE_TO_TAG='${HOMEBREW_UPDATE_TO_TAG:-}'"
+          if [ -n "${HOMEBREW_UPDATE_TO_TAG:-}" ]; then
+            echo "FAIL: HOMEBREW_UPDATE_TO_TAG should not be set when stable=false"
+            exit 1
+          fi
+          echo "PASS"
+      - name: Assert brew repository is on main branch
+        run: |
+          export PATH="/home/linuxbrew/.linuxbrew/bin:/opt/homebrew/bin:/usr/local/bin:$PATH"
+          REPO="$(brew --repo)"
+          git config --global --add safe.directory "$REPO" || true
+          BRANCH="$(git -C "$REPO" symbolic-ref --short HEAD)"
+          echo "branch: $BRANCH"
+          if [ "$BRANCH" != "main" ]; then
+            echo "FAIL: expected brew repository on 'main' branch"
+            exit 1
+          fi
+          echo "PASS"
+      - name: Assert gems-path output
+        env:
+          ACTUAL: ${{ steps.action.outputs.gems-path }}
+        run: |
+          echo "actual: $ACTUAL"
+          case "$ACTUAL" in
+            */vendor/bundle/ruby/) echo "PASS" ;;
+            *) echo "FAIL: unexpected gems-path"; exit 1 ;;
+          esac

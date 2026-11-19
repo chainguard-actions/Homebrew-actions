@@ -1,0 +1,68 @@
+name: Test retry with rebase on diverged remote
+on:
+  workflow_dispatch:
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - name: Set up diverged remote (non-conflicting)
+        run: |
+          set -e
+          rm -rf /tmp/gtp && mkdir -p /tmp/gtp
+          git init --bare -q /tmp/gtp/remote.git
+          git -C /tmp/gtp/remote.git symbolic-ref HEAD refs/heads/main
+          git init -q /tmp/gtp/work
+          cd /tmp/gtp/work
+          git checkout -q -b main
+          git config user.email "test@example.com"
+          git config user.name "Test User"
+          echo one > file.txt
+          git add file.txt
+          git commit -q -m "initial"
+          git remote add origin /tmp/gtp/remote.git
+          git push -q origin main
+          # Someone else pushes a commit to remote main
+          git clone -q /tmp/gtp/remote.git /tmp/gtp/other
+          cd /tmp/gtp/other
+          git config user.email "other@example.com"
+          git config user.name "Other User"
+          echo other > other.txt
+          git add other.txt
+          git commit -q -m "other commit"
+          git push -q origin main
+          git rev-parse HEAD > /tmp/gtp/other-sha
+          # Local makes a non-conflicting commit
+          cd /tmp/gtp/work
+          echo local > local.txt
+          git add local.txt
+          git commit -q -m "local commit"
+      - id: action
+        uses: .
+        with:
+          directory: /tmp/gtp/work
+          branch: main
+          tries: "3"
+      - name: Assert remote contains both commits (rebased)
+        run: |
+          LOCAL=$(git -C /tmp/gtp/work rev-parse main)
+          REMOTE=$(git -C /tmp/gtp/remote.git rev-parse refs/heads/main)
+          OTHER=$(cat /tmp/gtp/other-sha)
+          echo "local: $LOCAL"
+          echo "remote: $REMOTE"
+          echo "other: $OTHER"
+          if [ "$LOCAL" != "$REMOTE" ]; then
+            echo "FAIL: remote main does not match rebased local main"
+            exit 1
+          fi
+          if ! git -C /tmp/gtp/remote.git merge-base --is-ancestor "$OTHER" "$REMOTE"; then
+            echo "FAIL: other commit was lost"
+            exit 1
+          fi
+          MSG=$(git -C /tmp/gtp/remote.git log -1 --format=%s refs/heads/main)
+          echo "tip message: $MSG"
+          if [ "$MSG" != "local commit" ]; then
+            echo "FAIL: expected local commit at tip"
+            exit 1
+          fi
+          echo "PASS"

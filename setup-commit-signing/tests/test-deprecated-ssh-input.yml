@@ -1,0 +1,45 @@
+name: Test deprecated ssh input
+on:
+  workflow_dispatch:
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - name: Provide sibling deprecate-master.sh (lives in parent monorepo upstream)
+        run: |
+          target="$GITHUB_WORKSPACE/../deprecate-master.sh"
+          if [ ! -f "$target" ]; then
+            printf '#!/bin/bash\necho "deprecate-master stub: $*"\n' > "$target" 2>/dev/null \
+              || printf '#!/bin/bash\necho "deprecate-master stub: $*"\n' | sudo tee "$target" >/dev/null
+            chmod +x "$target" 2>/dev/null || sudo chmod +x "$target"
+          fi
+      - name: Configure git identity
+        run: |
+          git config --global user.email "dep@example.com"
+          git config --global user.name "Dep User"
+      - name: Generate test RSA SSH key
+        id: key
+        run: |
+          rm -f /tmp/dep_key /tmp/dep_key.pub
+          ssh-keygen -t rsa -b 2048 -N "" -C "dep" -f /tmp/dep_key -q
+          {
+            echo "private_key<<EOF_KEY"
+            cat /tmp/dep_key
+            echo "EOF_KEY"
+          } >> "$GITHUB_OUTPUT"
+      - id: action
+        uses: .
+        with:
+          signing_key: ${{ steps.key.outputs.private_key }}
+          ssh: "true"
+      - name: Assert SSH signing configured
+        run: |
+          expected_pub="$(cut -d' ' -f1,2 /tmp/dep_key.pub)"
+          fmt="$(git config --global gpg.format)"
+          skey="$(git config --global user.signingkey)"
+          echo "gpg.format=$fmt signingkey=$skey"
+          [ "$fmt" = "ssh" ] || { echo "FAIL: gpg.format"; exit 1; }
+          [ "$(echo "$skey" | cut -d' ' -f1,2)" = "$expected_pub" ] || { echo "FAIL: signingkey mismatch"; exit 1; }
+          grep -q "^dep@example.com ${expected_pub}" ~/.ssh/allowed_signers || { echo "FAIL: allowed signer missing"; exit 1; }
+          echo "PASS"

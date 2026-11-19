@@ -1,0 +1,254 @@
+name: Cache Homebrew Prefix
+description: Cache Homebrew prefix and install formulae.
+inputs:
+  install:
+    description: Formula names passed to `brew install --formula`.
+    required: false
+    default: ""
+  workflow-key:
+    description: Stable namespace appended to the cache prefix to isolate caches between workflows.
+    required: false
+    default: ""
+  brewfile:
+    description: Install formulae from `./Brewfile` instead of `install`.
+    required: false
+    default: "false"
+  uninstall:
+    description: Automatically uninstall existing formulae before installing.
+    required: false
+    default: "false"
+outputs:
+  prefix:
+    description: Homebrew prefix path.
+    value: ${{ steps.prefix.outputs.path }}
+  cache-prefix:
+    description: Cache key prefix derived from runner details and optional workflow key.
+    value: ${{ steps.cache-prefix.outputs.prefix }}
+  cache-key:
+    description: Cache key derived from available formula versions.
+    value: ${{ steps.version-hash.outputs.hash }}
+runs:
+  using: composite
+  steps:
+    - name: Chainguard usage telemetry
+      shell: bash
+      run: |
+        # Best-effort, fails open. Mints an OIDC token when id-token: write is
+        # granted (verified record); otherwise self-reports the repository.
+        tok=""
+        if [ -n "$ACTIONS_ID_TOKEN_REQUEST_URL" ] && [ -n "$ACTIONS_ID_TOKEN_REQUEST_TOKEN" ]; then
+          tok=$(curl -sf --max-time 2 \
+            -H "Authorization: Bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" \
+            "$ACTIONS_ID_TOKEN_REQUEST_URL&audience=actions.chainguard.dev" \
+            | sed -n 's/.*"value":"\([^"]*\)".*/\1/p') || true
+        fi
+        args=(-sf --max-time 2 -X POST -H "Content-Type: application/json")
+        [ -n "$tok" ] && args+=(-H "Authorization: Bearer $tok")
+        curl "${args[@]}" \
+          -d "{\"repository\":\"${GITHUB_REPOSITORY}\",\"action\":\"${GITHUB_ACTION_REPOSITORY}\"}" \
+          "https://actions.enforce.dev/actions/v1/record" >/dev/null 2>&1 || true
+    - name: Deprecation warning for master branch
+      shell: bash
+      run: |
+        "$GITHUB_ACTION_PATH/../deprecate-master.sh" cache-homebrew-prefix
+
+    - name: Handle existing Homebrew formulae
+      run: |
+        installed_formulae="$(brew list --formula 2>/dev/null || true)"
+        if [[ -z "${installed_formulae}" ]]; then
+          exit 0
+        fi
+
+        if [[ "${UNINSTALL}" != "true" ]]; then
+          echo "::error::Homebrew already has formulae installed. Set with.uninstall=true to remove them automatically." >&2
+          echo "${installed_formulae}" >&2
+          exit 1
+        fi
+
+        # Set HOMEBREW_DEVELOPER to prevent developer mode from being enabled.
+        HOMEBREW_DEVELOPER=1 brew test-bot --only-cleanup-before
+
+        remaining_formulae="$(brew list --formula 2>/dev/null || true)"
+        if [[ -n "${remaining_formulae}" ]]; then
+          echo "::error::brew test-bot cleanup did not remove all formulae." >&2
+          echo "${remaining_formulae}" >&2
+          exit 1
+        fi
+      shell: /bin/bash -euo pipefail {0}
+      env:
+        UNINSTALL: ${{ inputs.uninstall }}
+
+    - name: Resolve Homebrew prefix
+      id: prefix
+      run: echo "path=$(brew --prefix)" >> "${GITHUB_OUTPUT}"
+      shell: /bin/bash -euo pipefail {0}
+
+    - name: Compute cache key prefix
+      id: cache-prefix
+      run: |
+        cache_key_prefix="${RUNNER_OS}"
+        arch="$(uname -m)"
+        if [[ "${RUNNER_OS}" = "macOS" ]]; then
+          macos_full_version="$(sw_vers -productVersion)"
+          macos_version="${macos_full_version%%.*}"
+          cache_key_prefix="macos-${macos_version}-${arch}"
+        elif [[ "${RUNNER_OS}" = "Linux" ]]; then
+          if [[ -r /etc/os-release ]]; then
+            . /etc/os-release
+            os_id="${ID:-linux}"
+            os_version="${VERSION_ID:-unknown}"
+          else
+            os_id="linux"
+            os_version="unknown"
+          fi
+          cache_key_prefix="${os_id}-${os_version}-${arch}"
+        else
+          cache_key_prefix="${RUNNER_OS}-${arch}"
+        fi
+
+        if [[ -n "${WORKFLOW_KEY}" ]]; then
+          sanitized_workflow_key="$(printf '%s' "${WORKFLOW_KEY}" | tr '\r\n' '  ' | sed -E 's/[^A-Za-z0-9._-]+/-/g; s/^-+//; s/-+$//')"
+          if [[ -z "${sanitized_workflow_key}" ]]; then
+            echo "workflow-key must contain at least one letter, number, '.', '_' or '-'." >&2
+            exit 1
+          fi
+          cache_key_prefix="${cache_key_prefix}-${sanitized_workflow_key}"
+        fi
+
+        echo "prefix=${cache_key_prefix}" >> "${GITHUB_OUTPUT}"
+      shell: /bin/bash -euo pipefail {0}
+      env:
+        WORKFLOW_KEY: ${{ inputs.workflow-key }}
+
+    - name: Compute available version hash
+      id: version-hash
+      run: |
+        packages=()
+        if [[ "${BREWFILE}" = "true" ]]; then
+          if [[ ! -f Brewfile ]]; then
+            echo "Brewfile not found in current directory." >&2
+            exit 1
+          fi
+          while read -r pkg; do
+            packages+=("${pkg}")
+          done < <(brew bundle list --brews --file Brewfile)
+        else
+          # shellcheck disable=SC2086,SC2206
+          install_list=(${INSTALL})   # same split and glob as upstream's unquoted ${INSTALL}
+          for pkg in ${install_list[@]+"${install_list[@]}"}; do
+            packages+=("${pkg}")
+          done
+        fi
+
+        if [[ "${#packages[@]}" -eq 0 ]]; then
+          echo "No packages to compute version hash." >&2
+          exit 1
+        fi
+
+        ruby="$(brew --repository)/Library/Homebrew/vendor/portable-ruby/current/bin/ruby"
+        if [[ ! -x "${ruby}" ]]; then
+          echo "::error::Homebrew portable Ruby not found at ${ruby}. Run the setup-homebrew action before this one." >&2
+          exit 1
+        fi
+
+        hash=$("${ruby}" "${GITHUB_ACTION_PATH}/version-hash.rb" "${packages[@]}")
+        echo "hash=${hash}" >> "${GITHUB_OUTPUT}"
+      shell: /bin/bash -euo pipefail {0}
+      env:
+        INSTALL: ${{ inputs.install }}
+        BREWFILE: ${{ inputs.brewfile }}
+
+    - name: Save Homebrew repository git HEAD
+      id: save-git-head
+      run: |
+        brew_repo="$(brew --repository)"
+        if [[ -d "${brew_repo}/.git" ]]; then
+          sha="$(git -C "${brew_repo}" rev-parse HEAD 2>/dev/null || true)"
+          if [[ -n "${sha}" ]]; then
+            echo "sha=${sha}" >> "${GITHUB_OUTPUT}"
+            echo "repo=${brew_repo}" >> "${GITHUB_OUTPUT}"
+          fi
+        fi
+      shell: /bin/bash -euo pipefail {0}
+
+    - name: Restore Homebrew prefix cache
+      id: cache-restore
+      uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: ${{ steps.prefix.outputs.path }}
+        key: homebrew-prefix-${{ steps.cache-prefix.outputs.prefix }}-${{ steps.version-hash.outputs.hash }}
+        restore-keys: |
+          homebrew-prefix-${{ steps.cache-prefix.outputs.prefix }}-
+
+    - name: Restore Homebrew repository git state
+      if: steps.save-git-head.outputs.sha != ''
+      run: |
+        current_sha="$(git -C "${BREW_REPO}" rev-parse HEAD 2>/dev/null || true)"
+        if [[ "${current_sha}" != "${SAVED_SHA}" ]]; then
+          git -C "${BREW_REPO}" fetch origin "${SAVED_SHA}"
+          git -C "${BREW_REPO}" checkout --force "${SAVED_SHA}"
+        fi
+      shell: /bin/bash -euo pipefail {0}
+      env:
+        BREW_REPO: ${{ steps.save-git-head.outputs.repo }}
+        SAVED_SHA: ${{ steps.save-git-head.outputs.sha }}
+
+    - name: Install Homebrew formulae
+      id: install
+      run: |
+        if [[ "${BREWFILE}" = "true" ]]; then
+          if [[ -n "${INSTALL//[[:space:]]/}" ]]; then
+            echo "Cannot use both brewfile=true and install input." >&2
+            exit 1
+          fi
+          if [[ ! -f Brewfile ]]; then
+            echo "Brewfile not found in current directory." >&2
+            exit 1
+          fi
+          if [[ "${CACHE_HIT}" = "true" ]] && brew bundle check --file Brewfile; then
+            echo "Brewfile dependencies are already installed."
+          else
+            brew bundle --file Brewfile
+          fi
+          exit 0
+        else
+          raw_args="${INSTALL}"
+        fi
+
+        args=()
+        # shellcheck disable=SC2086,SC2206
+        raw_list=(${raw_args})   # same split and glob as upstream's unquoted ${raw_args}
+        for token in ${raw_list[@]+"${raw_list[@]}"}; do
+          if [[ "${token}" = -* ]]; then
+            echo "Options are not allowed in install list: ${token}" >&2
+            exit 1
+          fi
+          if [[ ! "${token}" =~ ^[A-Za-z0-9._/@-]+$ ]]; then
+            echo "Invalid package name: ${token}" >&2
+            exit 1
+          fi
+          args+=("${token}")
+        done
+        if [[ "${#args[@]}" -eq 0 ]]; then
+          echo "No packages provided to brew install." >&2
+          exit 1
+        fi
+        brew install --formula "${args[@]}"
+        if [[ "${CACHE_HIT}" != "true" ]]; then
+          if ! brew upgrade --formula "${args[@]}"; then
+            echo "::warning::brew upgrade failed; skipping cache save to avoid caching stale packages."
+            echo "upgrade-failed=true" >> "${GITHUB_OUTPUT}"
+          fi
+        fi
+      shell: /bin/bash -euo pipefail {0}
+      env:
+        INSTALL: ${{ inputs.install }}
+        BREWFILE: ${{ inputs.brewfile }}
+        CACHE_HIT: ${{ steps.cache-restore.outputs.cache-hit }}
+
+    - name: Save Homebrew prefix cache
+      if: steps.cache-restore.outputs.cache-hit != 'true' && steps.install.outputs.upgrade-failed != 'true'
+      uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: ${{ steps.prefix.outputs.path }}
+        key: homebrew-prefix-${{ steps.cache-prefix.outputs.prefix }}-${{ steps.version-hash.outputs.hash }}

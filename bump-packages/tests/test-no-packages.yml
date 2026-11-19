@@ -1,0 +1,38 @@
+name: Test no packages given
+on:
+  workflow_dispatch:
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - name: Ensure deprecate-master.sh exists next to the action
+        run: |
+          p="$(dirname "$GITHUB_WORKSPACE")/deprecate-master.sh"
+          if [ ! -f "$p" ]; then
+            printf '#!/bin/sh\necho "deprecate-master stub: $*"\nexit 0\n' > "$p" || sudo sh -c "printf '#!/bin/sh\nexit 0\n' > '$p'"
+          fi
+          chmod +x "$p" 2>/dev/null || sudo chmod +x "$p"
+      - name: Install mock brew
+        run: |
+          mkdir -p /tmp/mockbin
+          cat > /tmp/mockbin/brew <<'EOF'
+          #!/bin/bash
+          echo "$*" >> /tmp/brew-calls.log
+          exit 0
+          EOF
+          chmod +x /tmp/mockbin/brew
+          rm -f /tmp/brew-calls.log
+          echo "/tmp/mockbin" >> "$GITHUB_PATH"
+      - id: action
+        uses: .
+        with:
+          token: ${{ github.token }}
+      - name: Assert brew was not invoked
+        run: |
+          if [ -s /tmp/brew-calls.log ]; then
+            echo "FAIL: brew was invoked unexpectedly:"
+            cat /tmp/brew-calls.log
+            exit 1
+          fi
+          echo "PASS"

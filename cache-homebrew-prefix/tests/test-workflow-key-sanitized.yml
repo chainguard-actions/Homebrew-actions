@@ -1,0 +1,34 @@
+name: Test workflow-key sanitization
+on:
+  workflow_dispatch:
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - name: Set up fake Homebrew
+        run: bash "$GITHUB_WORKSPACE/tests/fixtures/setup-fake-brew.sh"
+      - id: action
+        uses: .
+        with:
+          install: tree
+          workflow-key: "  My Workflow/v1!  "
+      - name: Assert sanitized cache-prefix
+        env:
+          CACHE_PREFIX: ${{ steps.action.outputs.cache-prefix }}
+          CACHE_KEY: ${{ steps.action.outputs.cache-key }}
+        run: |
+          echo "cache-prefix: $CACHE_PREFIX"
+          echo "cache-key: $CACHE_KEY"
+          case "$CACHE_PREFIX" in
+            *-My-Workflow-v1) ;;
+            *) echo "FAIL: expected cache-prefix ending in -My-Workflow-v1"; exit 1 ;;
+          esac
+          case "$CACHE_PREFIX" in
+            *" "*|*"/"*|*"!"*) echo "FAIL: unsanitized characters remain"; exit 1 ;;
+          esac
+          expected_hash="$(printf 'tree 2.2.1 0\n' | sha256sum | cut -d' ' -f1)"
+          if [ "$CACHE_KEY" != "$expected_hash" ]; then
+            echo "FAIL: cache-key expected $expected_hash"; exit 1
+          fi
+          echo "PASS"

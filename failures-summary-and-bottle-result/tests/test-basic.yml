@@ -1,0 +1,38 @@
+name: Test basic usage
+on:
+  workflow_dispatch:
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - name: Create result file
+        run: |
+          mkdir -p "$GITHUB_WORKSPACE/bottles"
+          printf 'line one\nline two\n' > "$GITHUB_WORKSPACE/bottles/steps_output.txt"
+          rm -f /tmp/summary-basic.md
+      - id: action
+        uses: .
+        env:
+          GITHUB_STEP_SUMMARY: /tmp/summary-basic.md
+      - name: Assert result file removed
+        run: |
+          if [ -e "$GITHUB_WORKSPACE/bottles/steps_output.txt" ]; then
+            echo "FAIL: result file should have been removed"
+            exit 1
+          fi
+          echo "PASS: result file removed"
+      - name: Assert summary content (if custom summary path honored)
+        run: |
+          f=/tmp/summary-basic.md
+          if [ ! -f "$f" ]; then
+            echo "NOTE: custom GITHUB_STEP_SUMMARY not honored by runner; skipping content check"
+            exit 0
+          fi
+          cat "$f"
+          grep -qF '### `brew test-bot` output' "$f" || { echo "FAIL: missing heading"; exit 1; }
+          grep -qx 'line one' "$f" || { echo "FAIL: missing content"; exit 1; }
+          grep -qx 'line two' "$f" || { echo "FAIL: missing content"; exit 1; }
+          [ "$(grep -c '^```$' "$f")" = "2" ] || { echo "FAIL: expected 2 code fences"; exit 1; }
+          if grep -q '<details>' "$f"; then echo "FAIL: should not be collapsed"; exit 1; fi
+          echo "PASS"

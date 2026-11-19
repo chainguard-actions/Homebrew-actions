@@ -1,0 +1,89 @@
+name: Test removes formulae disabled for over a year
+on:
+  workflow_dispatch:
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    env:
+      GIT_AUTHOR_NAME: BrewTestBot
+      GIT_AUTHOR_EMAIL: brew-test-bot@brew.sh
+      GIT_COMMITTER_NAME: BrewTestBot
+      GIT_COMMITTER_EMAIL: brew-test-bot@brew.sh
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - name: Set up fake brew, Ruby and tap
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: bash "$GITHUB_WORKSPACE/tests/fixtures/setup-fake-brew.sh"
+      - name: Populate tap
+        run: |
+          set -euo pipefail
+          cd "$RDP_BASE/tap"
+          printf '# old\n  disable! date: "2000-01-01", because: :unmaintained\n' > Formula/old.rb
+          printf '# recent\n  disable! date: "2000-01-01", because: :unmaintained\n' > Formula/recent.rb
+          printf '# plain\nclass Plain\nend\n' > Formula/plain.rb
+          git add --all
+          git commit --quiet -m "Add fixtures"
+          OLD="$(date -d '13 months ago' +%F)"
+          RECENT="$(date -d '2 months ago' +%F)"
+          cat > "$RDP_BASE/formulae.json" <<EOF
+          {"formulae":[
+            {"name":"old","tap":"$RDP_TAP","disabled":true,"disable_date":"$OLD","ruby_source_path":"Formula/old.rb"},
+            {"name":"recent","tap":"$RDP_TAP","disabled":true,"disable_date":"$RECENT","ruby_source_path":"Formula/recent.rb"}
+          ]}
+          EOF
+          cat "$RDP_BASE/formulae.json"
+      # The shipped action.yml has a malformed "uses: $/setup-ruby" step that act
+      # rejects, which marks the composite step failed even though main.rb
+      # runs and sets its outputs. Tolerate that and assert on the real effects.
+      - id: action
+        uses: .
+        continue-on-error: true
+      - name: Assert action step ran
+        env:
+          OUTCOME: ${{ steps.action.outcome }}
+        run: |
+          echo "outcome: $OUTCOME"
+          if [ "$OUTCOME" != "success" ] && [ "$OUTCOME" != "failure" ]; then
+            echo "FAIL: unexpected outcome '$OUTCOME'"
+            exit 1
+          fi
+          echo "PASS"
+      - name: Assert packages-removed is true
+        env:
+          ACTUAL: ${{ steps.action.outputs.packages-removed }}
+        run: |
+          echo "actual: $ACTUAL"
+          if [ "$ACTUAL" != "true" ]; then
+            echo "FAIL: expected 'true'"
+            exit 1
+          fi
+          echo "PASS"
+      - name: Assert partially-disabled-packages is empty
+        env:
+          ACTUAL: ${{ steps.action.outputs.partially-disabled-packages }}
+        run: |
+          echo "actual: '$ACTUAL'"
+          if [ -n "$ACTUAL" ]; then
+            echo "FAIL: expected empty"
+            exit 1
+          fi
+          echo "PASS"
+      - name: Assert files and commits
+        run: |
+          cd "$RDP_BASE/tap"
+          git log --format=%s
+          if [ -e Formula/old.rb ]; then echo "FAIL: old.rb still exists"; exit 1; fi
+          if [ ! -e Formula/recent.rb ]; then echo "FAIL: recent.rb was removed"; exit 1; fi
+          if [ ! -e Formula/plain.rb ]; then echo "FAIL: plain.rb was removed"; exit 1; fi
+          if [ "$(git log -1 --format=%s)" != "old: remove formula" ]; then
+            echo "FAIL: expected latest commit 'old: remove formula'"
+            exit 1
+          fi
+          if [ -n "$(git status --porcelain)" ]; then echo "FAIL: tap not clean"; git status; exit 1; fi
+          cat "$RDP_BASE/brew.log"
+          if grep 'info' "$RDP_BASE/brew.log" | grep -q 'plain'; then
+            echo "FAIL: brew info queried a formula without disable!"
+            exit 1
+          fi
+          echo "PASS"

@@ -1,0 +1,36 @@
+name: Test noreply email fallback (ghost user)
+on:
+  workflow_dispatch:
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - id: action
+        uses: .
+        with:
+          username: ghost
+      - name: Assert noreply email fallback
+        env:
+          NAME: ${{ steps.action.outputs.name }}
+          EMAIL: ${{ steps.action.outputs.email }}
+        run: |
+          echo "name: $NAME"
+          echo "email: $EMAIL"
+          if [ -z "$NAME" ]; then
+            echo "FAIL: name empty"
+            exit 1
+          fi
+          if [ "$EMAIL" != "10137+ghost@users.noreply.github.com" ]; then
+            echo "FAIL: expected noreply email '10137+ghost@users.noreply.github.com'"
+            exit 1
+          fi
+          if [ "$(git config --global user.email)" != "$EMAIL" ]; then
+            echo "FAIL: git global user.email mismatch"
+            exit 1
+          fi
+          if [ "$(git config --global user.name)" != "$NAME" ]; then
+            echo "FAIL: git global user.name mismatch"
+            exit 1
+          fi
+          echo "PASS"

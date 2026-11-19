@@ -1,0 +1,81 @@
+name: Test partially disabled formulae are reported, not removed
+on:
+  workflow_dispatch:
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    env:
+      GIT_AUTHOR_NAME: BrewTestBot
+      GIT_AUTHOR_EMAIL: brew-test-bot@brew.sh
+      GIT_COMMITTER_NAME: BrewTestBot
+      GIT_COMMITTER_EMAIL: brew-test-bot@brew.sh
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - name: Set up fake brew, Ruby and tap
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: bash "$GITHUB_WORKSPACE/tests/fixtures/setup-fake-brew.sh"
+      - name: Populate tap
+        run: |
+          set -euo pipefail
+          cd "$RDP_BASE/tap"
+          printf '# staggered\n  disable! date: "2000-01-01", because: :unmaintained\n' > Formula/staggered.rb
+          git add --all
+          git commit --quiet -m "Add fixtures"
+          OLD="$(date -d '13 months ago' +%F)"
+          RECENT="$(date -d '2 months ago' +%F)"
+          echo "OLD_DATE=$OLD" >> "$GITHUB_ENV"
+          cat > "$RDP_BASE/formulae.json" <<EOF
+          {"formulae":[
+            {"name":"staggered","tap":"$RDP_TAP","disabled":true,"disable_date":"$OLD","ruby_source_path":"Formula/staggered.rb",
+             "variations":{"x86_64_linux":{"disabled":true,"disable_date":"$RECENT"}}}
+          ]}
+          EOF
+          cat "$RDP_BASE/formulae.json"
+      # The shipped action.yml has a malformed "uses: $/setup-ruby" step that act
+      # rejects, which marks the composite step failed even though main.rb
+      # runs and sets its outputs. Tolerate that and assert on the real effects.
+      - id: action
+        uses: .
+        continue-on-error: true
+      - name: Assert action step ran
+        env:
+          OUTCOME: ${{ steps.action.outcome }}
+        run: |
+          echo "outcome: $OUTCOME"
+          if [ "$OUTCOME" != "success" ] && [ "$OUTCOME" != "failure" ]; then
+            echo "FAIL: unexpected outcome '$OUTCOME'"
+            exit 1
+          fi
+          echo "PASS"
+      - name: Assert packages-removed is false
+        env:
+          ACTUAL: ${{ steps.action.outputs.packages-removed }}
+        run: |
+          echo "actual: $ACTUAL"
+          if [ "$ACTUAL" != "false" ]; then
+            echo "FAIL: expected 'false'"
+            exit 1
+          fi
+          echo "PASS"
+      - name: Assert partially-disabled-packages lists the formula
+        env:
+          ACTUAL: ${{ steps.action.outputs.partially-disabled-packages }}
+        run: |
+          echo "actual: $ACTUAL"
+          EXPECTED_PREFIX="- \`staggered\` (formula, disabled $OLD_DATE): [Formula/staggered.rb]("
+          case "$ACTUAL" in
+            "$EXPECTED_PREFIX"*) ;;
+            *) echo "FAIL: expected to start with: $EXPECTED_PREFIX"; exit 1 ;;
+          esac
+          case "$ACTUAL" in
+            *"/blob/HEAD/Formula/staggered.rb)") ;;
+            *) echo "FAIL: expected link to /blob/HEAD/Formula/staggered.rb"; exit 1 ;;
+          esac
+          echo "PASS"
+      - name: Assert formula kept
+        run: |
+          cd "$RDP_BASE/tap"
+          if [ ! -e Formula/staggered.rb ]; then echo "FAIL: staggered.rb was removed"; exit 1; fi
+          if [ "$(git rev-list --count HEAD)" != "1" ]; then echo "FAIL: unexpected commits"; exit 1; fi
+          echo "PASS"

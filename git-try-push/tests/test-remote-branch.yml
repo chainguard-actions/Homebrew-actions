@@ -1,0 +1,65 @@
+name: Test push to different remote branch
+on:
+  workflow_dispatch:
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - name: Set up local bare remote and work clone
+        run: |
+          set -e
+          rm -rf /tmp/gtp && mkdir -p /tmp/gtp
+          git init --bare -q /tmp/gtp/remote.git
+          git -C /tmp/gtp/remote.git symbolic-ref HEAD refs/heads/main
+          git init -q /tmp/gtp/work
+          cd /tmp/gtp/work
+          git checkout -q -b main
+          git config user.email "test@example.com"
+          git config user.name "Test User"
+          echo one > file.txt
+          git add file.txt
+          git commit -q -m "initial"
+          git remote add origin /tmp/gtp/remote.git
+          git push -q origin main
+          git rev-parse main > /tmp/gtp/initial-sha
+          git checkout -q -b feature
+          echo feature > feature.txt
+          git add feature.txt
+          git commit -q -m "feature commit"
+          git checkout -q main
+      - id: action
+        uses: .
+        with:
+          directory: /tmp/gtp/work
+          branch: feature
+          remote_branch: published
+          tries: "3"
+      - name: Assert feature pushed to remote 'published' and main untouched
+        run: |
+          LOCAL=$(git -C /tmp/gtp/work rev-parse feature)
+          PUB=$(git -C /tmp/gtp/remote.git rev-parse refs/heads/published)
+          MAIN=$(git -C /tmp/gtp/remote.git rev-parse refs/heads/main)
+          INITIAL=$(cat /tmp/gtp/initial-sha)
+          echo "local feature: $LOCAL"
+          echo "remote published: $PUB"
+          echo "remote main: $MAIN (initial $INITIAL)"
+          if [ "$LOCAL" != "$PUB" ]; then
+            echo "FAIL: remote 'published' does not match local feature"
+            exit 1
+          fi
+          if [ "$MAIN" != "$INITIAL" ]; then
+            echo "FAIL: remote main changed unexpectedly"
+            exit 1
+          fi
+          if git -C /tmp/gtp/remote.git rev-parse --verify -q refs/heads/feature >/dev/null; then
+            echo "FAIL: remote 'feature' branch should not exist"
+            exit 1
+          fi
+          CUR=$(git -C /tmp/gtp/work rev-parse --abbrev-ref HEAD)
+          echo "current branch: $CUR"
+          if [ "$CUR" != "main" ]; then
+            echo "FAIL: expected action to return to previous branch main"
+            exit 1
+          fi
+          echo "PASS"

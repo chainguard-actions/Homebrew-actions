@@ -1,0 +1,44 @@
+name: Test zero tries does not push
+on:
+  workflow_dispatch:
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - name: Set up local bare remote and work clone
+        run: |
+          set -e
+          rm -rf /tmp/gtp && mkdir -p /tmp/gtp
+          git init --bare -q /tmp/gtp/remote.git
+          git -C /tmp/gtp/remote.git symbolic-ref HEAD refs/heads/main
+          git init -q /tmp/gtp/work
+          cd /tmp/gtp/work
+          git checkout -q -b main
+          git config user.email "test@example.com"
+          git config user.name "Test User"
+          echo one > file.txt
+          git add file.txt
+          git commit -q -m "initial"
+          git remote add origin /tmp/gtp/remote.git
+          git push -q origin main
+          git rev-parse main > /tmp/gtp/initial-sha
+          echo two >> file.txt
+          git commit -q -am "second"
+      - id: action
+        uses: .
+        with:
+          directory: /tmp/gtp/work
+          branch: main
+          tries: "0"
+      - name: Assert remote main unchanged
+        run: |
+          INITIAL=$(cat /tmp/gtp/initial-sha)
+          REMOTE=$(git -C /tmp/gtp/remote.git rev-parse refs/heads/main)
+          echo "initial: $INITIAL"
+          echo "remote: $REMOTE"
+          if [ "$INITIAL" != "$REMOTE" ]; then
+            echo "FAIL: remote was pushed despite tries=0"
+            exit 1
+          fi
+          echo "PASS"

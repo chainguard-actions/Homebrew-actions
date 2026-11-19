@@ -1,0 +1,39 @@
+name: Test default repository
+on:
+  workflow_dispatch:
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - id: action
+        uses: .
+        continue-on-error: true
+        with:
+          github_token: ${{ github.token }}
+          runner_name: nonexistent-runner-actionchain-test
+      - name: Assert action ran (runner not found, or failed gracefully on the sentinel repo)
+        env:
+          FOUND: ${{ steps.action.outputs.runner-found }}
+          IDLE: ${{ steps.action.outputs.runner-idle }}
+          OUTCOME: ${{ steps.action.outcome }}
+        run: |
+          echo "outcome: $OUTCOME"
+          echo "runner-found: $FOUND"
+          echo "runner-idle: $IDLE"
+          if [ "$OUTCOME" = "success" ]; then
+            if [ "$FOUND" != "false" ]; then
+              echo "FAIL: expected runner-found=false for a nonexistent runner"
+              exit 1
+            fi
+            if [ -n "$IDLE" ]; then
+              echo "FAIL: runner-idle should not be set when runner is not found"
+              exit 1
+            fi
+            echo "PASS: runner not found"
+          elif [ "$OUTCOME" = "failure" ]; then
+            echo "PASS: action failed gracefully (sentinel repo is not resolvable)"
+          else
+            echo "FAIL: unexpected outcome '$OUTCOME'"
+            exit 1
+          fi

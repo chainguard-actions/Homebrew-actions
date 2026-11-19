@@ -1,14 +1,50 @@
-# Homebrew/actions
+# Homebrew's GitHub Actions
 
-Commit and push changes to GitHub repository via GitHub API
+Navigate to subdirectories for more information about particular Actions.
 
-Hardened by [Chainguard](https://www.chainguard.dev) from the upstream action at [https://github.com/Homebrew/actions](https://github.com/Homebrew/actions).
+Every directory (except `node_modules`) is a separate Action.
 
-## Versions
+## Releases
 
-| Version | Tag | Upstream commit | Hardening report |
-|---------|-----|-----------------|------------------|
-| 2026.10.19.1 | [`2026.10.19.1`](https://github.com/chainguard-actions/Homebrew-actions/tree/2026.10.19.1) | [`4790763`](https://github.com/Homebrew/actions/commit/4790763c0a3ba4036f72634dc079c4a7dfcd4878) | [`api-commit-and-push`](https://github.com/chainguard-actions/Homebrew-actions/blob/2026.10.19.1/api-commit-and-push/HARDENING.md), [`bump-formulae`](https://github.com/chainguard-actions/Homebrew-actions/blob/2026.10.19.1/bump-formulae/HARDENING.md), [`bump-packages`](https://github.com/chainguard-actions/Homebrew-actions/blob/2026.10.19.1/bump-packages/HARDENING.md), [`cache-homebrew-prefix`](https://github.com/chainguard-actions/Homebrew-actions/blob/2026.10.19.1/cache-homebrew-prefix/HARDENING.md), [`check-commit-format`](https://github.com/chainguard-actions/Homebrew-actions/blob/2026.10.19.1/check-commit-format/HARDENING.md), [`create-or-update-issue`](https://github.com/chainguard-actions/Homebrew-actions/blob/2026.10.19.1/create-or-update-issue/HARDENING.md), [`create-pull-request`](https://github.com/chainguard-actions/Homebrew-actions/blob/2026.10.19.1/create-pull-request/HARDENING.md), [`dismiss-approvals`](https://github.com/chainguard-actions/Homebrew-actions/blob/2026.10.19.1/dismiss-approvals/HARDENING.md), [`failures-summary-and-bottle-result`](https://github.com/chainguard-actions/Homebrew-actions/blob/2026.10.19.1/failures-summary-and-bottle-result/HARDENING.md), [`find-related-workflow-run-id`](https://github.com/chainguard-actions/Homebrew-actions/blob/2026.10.19.1/find-related-workflow-run-id/HARDENING.md), [`git-try-push`](https://github.com/chainguard-actions/Homebrew-actions/blob/2026.10.19.1/git-try-push/HARDENING.md), [`git-user-config`](https://github.com/chainguard-actions/Homebrew-actions/blob/2026.10.19.1/git-user-config/HARDENING.md), [`label-pull-requests`](https://github.com/chainguard-actions/Homebrew-actions/blob/2026.10.19.1/label-pull-requests/HARDENING.md), [`limit-pull-requests`](https://github.com/chainguard-actions/Homebrew-actions/blob/2026.10.19.1/limit-pull-requests/HARDENING.md), [`post-build`](https://github.com/chainguard-actions/Homebrew-actions/blob/2026.10.19.1/post-build/HARDENING.md), [`post-comment`](https://github.com/chainguard-actions/Homebrew-actions/blob/2026.10.19.1/post-comment/HARDENING.md), [`pre-build`](https://github.com/chainguard-actions/Homebrew-actions/blob/2026.10.19.1/pre-build/HARDENING.md), [`remove-disabled-packages`](https://github.com/chainguard-actions/Homebrew-actions/blob/2026.10.19.1/remove-disabled-packages/HARDENING.md), [`setup-commit-signing`](https://github.com/chainguard-actions/Homebrew-actions/blob/2026.10.19.1/setup-commit-signing/HARDENING.md), [`setup-homebrew`](https://github.com/chainguard-actions/Homebrew-actions/blob/2026.10.19.1/setup-homebrew/HARDENING.md), [`setup-ruby`](https://github.com/chainguard-actions/Homebrew-actions/blob/2026.10.19.1/setup-ruby/HARDENING.md), [`wait-for-idle-runner`](https://github.com/chainguard-actions/Homebrew-actions/blob/2026.10.19.1/wait-for-idle-runner/HARDENING.md) |
+All Actions in this repository are released together using bare CalVer tags in
+the form `YYYY.MM.DD.N`, where `N` starts at 1 each UTC day. Release tags point
+directly to commits on `main` and are never moved. Each tag has a published
+GitHub Release with generated release notes. CalVer identifies when a snapshot
+was cut; it does not imply semantic compatibility, a support window, or
+multiple maintained release tracks.
+
+Consumers can use an exact CalVer tag for readability. Environments that
+require immutable third-party action pins should use the tag's full commit SHA
+and retain the CalVer tag in a comment.
+
+A scheduled workflow runs every Monday at 12:00 UTC. It skips the release when
+there are no commits since the latest CalVer tag or when the latest commit has
+had less than 24 hours to bake. Maintainers can dispatch the workflow manually
+to release an urgent fix without waiting for the bake period. A recent commit
+defers the entire scheduled release, including older changes that have already
+had time to bake.
+
+## Development
+
+In Actions' subdirectories, there are no separate `node_modules` directories or `package-lock.json` files.
+That's because we try to maintain one top-level dependency stack for all Actions together.
+To add a new dependency (because some Action requires it), run `npm install` in root directory of this repository.
+To update dependencies for all Actions at once, one needs to simply run `npm upgrade`, while being in root directory of this repository too.
+
+Production dependencies are committed in `node_modules`. After changing the lockfile,
+run `npm ci --ignore-scripts --omit=dev` and commit the resulting dependency changes.
+The required Node test checks that these files match the lockfile before installing development dependencies.
+Dependabot npm PRs receive a vendor update automatically after the Node test completes.
+For other PRs from this repository, dispatch the `Vendor node_modules` workflow with the PR number.
+The updater accepts dependencies from the npm registry only.
+
+Workflow names match Actions' directory names, for consistency.
+Particular workflow to test an Action is run only when this Action's directory contents or workflow file are changed.
+In addition to that, all test workflows will run if `package.json` or `package-lock.json` files or `node_modules` directory are changed.
+
+> Please be careful not to start multiple workflow jobs testing the same Action at once, as it may cause a failure, because of the way some Actions are tested.
+
+To test an action locally, first run `npm install` in the root of this repository, then in the directory of your action, run `node main.js`. Input variables are specified through the environment. For example, if an Action needed a `pull_request` input, running `export INPUT_PULL_REQUEST=1234` would pass that input to the Node.js script. For Actions that need variables from the [GitHub Events API](https://docs.github.com/en/free-pro-team@latest/developers/webhooks-and-events/github-event-types), you'll need to save (or construct) the appropriate JSON file, then set `GITHUB_EVENT_PATH` to the file's location.
 
 ## Privacy
 

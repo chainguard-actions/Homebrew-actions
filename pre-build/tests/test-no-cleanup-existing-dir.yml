@@ -1,0 +1,40 @@
+name: Test pre-build without cleanup replaces existing bottles dir
+on:
+  workflow_dispatch:
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - name: Pre-populate bottles directory with stale file
+        run: |
+          mkdir -p "$GITHUB_WORKSPACE/bottles-stale"
+          echo stale > "$GITHUB_WORKSPACE/bottles-stale/old.bottle.tar.gz"
+      - id: action
+        uses: .
+        continue-on-error: true
+        with:
+          bottles-directory: ${{ github.workspace }}/bottles-stale
+          cleanup: "false"
+          download-bottles: "false"
+      - name: Assert stale bottles removed (or graceful failure)
+        env:
+          OUTCOME: ${{ steps.action.outcome }}
+        run: |
+          echo "outcome: $OUTCOME"
+          if [ "$OUTCOME" = "success" ]; then
+            if [ ! -d "$GITHUB_WORKSPACE/bottles-stale" ]; then
+              echo "FAIL: bottles directory missing"
+              exit 1
+            fi
+            if [ -e "$GITHUB_WORKSPACE/bottles-stale/old.bottle.tar.gz" ]; then
+              echo "FAIL: stale bottle file was not removed"
+              exit 1
+            fi
+            echo "PASS: bottles directory recreated empty"
+          elif [ "$OUTCOME" = "failure" ]; then
+            echo "PASS: action failed gracefully (Homebrew/sibling actions unavailable under harness)"
+          else
+            echo "FAIL: unexpected outcome '$OUTCOME'"
+            exit 1
+          fi

@@ -1,0 +1,36 @@
+name: Test valid definition outside a pull_request event
+on:
+  workflow_dispatch:
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - id: action
+        uses: .
+        continue-on-error: true
+        with:
+          def: |
+            - label: new formula
+              status: added
+              path: Formula/.+
+            - label: legacy
+              path: Formula/.+@.+
+              except:
+                - Formula/python@3.8
+                - Formula/python@3.9
+            - label: bump-formula-pr
+              pr_body_content: Created with `brew bump-formula-pr`
+      - name: Assert action failed gracefully (no pull_request payload / sentinel repo)
+        env:
+          OUTCOME: ${{ steps.action.outcome }}
+        run: |
+          echo "outcome: $OUTCOME"
+          # Under workflow_dispatch there is no pull_request in the event payload,
+          # and the sentinel repository cannot be queried, so the action must fail.
+          if [ "$OUTCOME" = "failure" ]; then
+            echo "PASS: action failed gracefully without a pull request"
+          else
+            echo "FAIL: unexpected outcome '$OUTCOME'"
+            exit 1
+          fi
