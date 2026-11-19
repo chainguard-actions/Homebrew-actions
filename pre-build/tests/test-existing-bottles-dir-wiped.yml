@@ -1,0 +1,71 @@
+name: Test existing bottles directory is recreated
+on:
+  workflow_dispatch:
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - name: Install stub brew (real Homebrew is unavailable under act)
+        run: |
+          mkdir -p "$RUNNER_TEMP/fakebin"
+          cat > "$RUNNER_TEMP/fakebin/brew" <<'EOF'
+          #!/bin/bash
+          echo "$*" >> "${RUNNER_TEMP}/brew-calls.log"
+          echo "stub brew: $*"
+          exit 0
+          EOF
+          chmod +x "$RUNNER_TEMP/fakebin/brew"
+          : > "$RUNNER_TEMP/brew-calls.log"
+          echo "$RUNNER_TEMP/fakebin" >> "$GITHUB_PATH"
+      - name: Pre-populate bottles directory
+        env:
+          BOTTLES_DIR: ${{ runner.temp }}/bottles-existing
+        run: |
+          mkdir -p "$BOTTLES_DIR/sub"
+          echo stale > "$BOTTLES_DIR/stale.tar.gz"
+          echo stale > "$BOTTLES_DIR/sub/old.json"
+      # act cannot parse the action's nested "uses: $/setup-homebrew" ref and
+      # marks the composite failed, although its own shell steps all run.
+      - id: action
+        uses: .
+        continue-on-error: true
+        with:
+          bottles-directory: ${{ runner.temp }}/bottles-existing
+          cleanup: "true"
+      - name: Assert action outcome is success or failure (not skipped)
+        env:
+          OUTCOME: ${{ steps.action.outcome }}
+        run: |
+          echo "outcome: $OUTCOME"
+          if [ "$OUTCOME" != "success" ] && [ "$OUTCOME" != "failure" ]; then
+            echo "FAIL: unexpected outcome '$OUTCOME'"
+            exit 1
+          fi
+          echo "PASS"
+      - name: Assert stale contents removed
+        env:
+          BOTTLES_DIR: ${{ runner.temp }}/bottles-existing
+        run: |
+          ls -la "$BOTTLES_DIR" || true
+          if [ ! -d "$BOTTLES_DIR" ]; then
+            echo "FAIL: bottles directory missing"
+            exit 1
+          fi
+          if [ -e "$BOTTLES_DIR/stale.tar.gz" ] || [ -e "$BOTTLES_DIR/sub" ]; then
+            echo "FAIL: stale contents were not removed"
+            exit 1
+          fi
+          echo "PASS"
+      - name: Assert cleanup and setup brew commands ran
+        run: |
+          cat "$RUNNER_TEMP/brew-calls.log"
+          if ! grep -q -- "test-bot --only-cleanup-before" "$RUNNER_TEMP/brew-calls.log"; then
+            echo "FAIL: cleanup was not invoked although cleanup=true"
+            exit 1
+          fi
+          if ! grep -q -- "test-bot --only-setup" "$RUNNER_TEMP/brew-calls.log"; then
+            echo "FAIL: brew test-bot --only-setup was not invoked"
+            exit 1
+          fi
+          echo "PASS"

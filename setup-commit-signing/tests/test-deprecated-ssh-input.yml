@@ -1,0 +1,40 @@
+name: Test deprecated ssh input has no effect
+on:
+  workflow_dispatch:
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - name: Prepare environment
+        id: prep
+        run: |
+          if [ ! -f "$GITHUB_WORKSPACE/../deprecate-master.sh" ]; then
+            printf '#!/bin/bash\necho "stub deprecate-master: $*"\n' > "$GITHUB_WORKSPACE/../deprecate-master.sh"
+            chmod +x "$GITHUB_WORKSPACE/../deprecate-master.sh"
+          fi
+          git config --global user.email "dep@example.com"
+          git config --global user.name "Dep User"
+          rm -f /tmp/dep_key /tmp/dep_key.pub
+          ssh-keygen -t ed25519 -N "" -C "dep" -f /tmp/dep_key -q
+          {
+            echo "key<<EOF_KEY"
+            cat /tmp/dep_key
+            echo "EOF_KEY"
+          } >> "$GITHUB_OUTPUT"
+      - id: action
+        uses: .
+        with:
+          signing_key: ${{ steps.prep.outputs.key }}
+          ssh: "false"
+      - name: Assert SSH signing configured regardless of ssh input
+        run: |
+          PUB="$(cut -d' ' -f1,2 /tmp/dep_key.pub)"
+          FMT="$(git config --global gpg.format)"
+          KEY="$(git config --global user.signingkey)"
+          echo "gpg.format=$FMT signingkey=$KEY"
+          [ "$FMT" = "ssh" ] || { echo "FAIL: gpg.format should be ssh"; exit 1; }
+          KEY2="$(echo "$KEY" | cut -d' ' -f1,2)"
+          [ "$KEY2" = "$PUB" ] || { echo "FAIL: signingkey mismatch (expected $PUB, got $KEY2)"; exit 1; }
+          grep -qF "dep@example.com $PUB" "$HOME/.ssh/allowed_signers" || { echo "FAIL: allowed_signers entry missing"; exit 1; }
+          echo "PASS"

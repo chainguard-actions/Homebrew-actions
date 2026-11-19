@@ -1,0 +1,62 @@
+name: Test retry with rebase when remote diverged
+on:
+  workflow_dispatch:
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - name: Set up diverged remote and clone
+        run: |
+          set -e
+          ROOT="$RUNNER_TEMP/gtp-rebase"
+          rm -rf "$ROOT"; mkdir -p "$ROOT"
+          git init --bare "$ROOT/remote.git"
+          git init "$ROOT/clone"
+          cd "$ROOT/clone"
+          git config user.email test@example.com
+          git config user.name "Test User"
+          git checkout -b main
+          echo base > base.txt
+          git add base.txt
+          git commit -m "base"
+          git remote add origin "$ROOT/remote.git"
+          git push origin main
+          # Another clone pushes a commit to remote
+          git clone -b main "$ROOT/remote.git" "$ROOT/other"
+          cd "$ROOT/other"
+          git config user.email other@example.com
+          git config user.name "Other User"
+          echo remote > remote.txt
+          git add remote.txt
+          git commit -m "remote change"
+          git push origin main
+          git rev-parse HEAD > "$ROOT/remote-commit"
+          # Local commit that diverges
+          cd "$ROOT/clone"
+          echo local > local.txt
+          git add local.txt
+          git commit -m "local change"
+          git checkout -b work
+          echo "ROOT=$ROOT" >> "$GITHUB_ENV"
+      - id: action
+        uses: .
+        with:
+          directory: ${{ env.ROOT }}/clone
+          branch: main
+          tries: "3"
+      - name: Assert remote contains both commits
+        run: |
+          set -e
+          REMOTE_COMMIT="$(cat "$ROOT/remote-commit")"
+          HEAD_MSG="$(git --git-dir="$ROOT/remote.git" log -1 --format=%s refs/heads/main)"
+          echo "remote head message: $HEAD_MSG"
+          if [ "$HEAD_MSG" != "local change" ]; then
+            echo "FAIL: expected local change on top of remote"
+            exit 1
+          fi
+          if ! git --git-dir="$ROOT/remote.git" merge-base --is-ancestor "$REMOTE_COMMIT" refs/heads/main; then
+            echo "FAIL: remote commit lost"
+            exit 1
+          fi
+          echo "PASS"

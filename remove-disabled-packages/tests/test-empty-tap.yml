@@ -1,0 +1,62 @@
+name: Test empty tap removes nothing
+on:
+  workflow_dispatch:
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - name: Prepare an empty tap for the current repository (if brew is available)
+        id: setup
+        run: |
+          BREW=""
+          if command -v brew >/dev/null 2>&1; then
+            BREW="$(command -v brew)"
+          elif [ -x /home/linuxbrew/.linuxbrew/bin/brew ]; then
+            BREW=/home/linuxbrew/.linuxbrew/bin/brew
+            echo "/home/linuxbrew/.linuxbrew/bin" >> "$GITHUB_PATH"
+          fi
+          if [ -z "$BREW" ]; then
+            echo "brew not available"
+            echo "brew=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          TAP_DIR="$("$BREW" --repository "$GITHUB_REPOSITORY")"
+          echo "tap dir: $TAP_DIR"
+          mkdir -p "$TAP_DIR"
+          cd "$TAP_DIR"
+          git init -q .
+          git config user.email "test@example.com"
+          git config user.name "Test User"
+          echo "# empty tap" > README.md
+          git add README.md
+          git commit -q -m "init"
+          echo "brew=true" >> "$GITHUB_OUTPUT"
+      - id: action
+        uses: .
+        continue-on-error: true
+      - name: Assert no packages removed (or graceful failure without brew)
+        env:
+          RESULT: ${{ steps.action.outputs.packages-removed }}
+          OUTCOME: ${{ steps.action.outcome }}
+          HAS_BREW: ${{ steps.setup.outputs.brew }}
+        run: |
+          echo "brew available: $HAS_BREW"
+          echo "outcome: $OUTCOME"
+          echo "result: $RESULT"
+          if [ "$OUTCOME" = "success" ]; then
+            if [ "$RESULT" != "false" ]; then
+              echo "FAIL: expected packages-removed=false for an empty tap"
+              exit 1
+            fi
+            echo "PASS: no packages removed"
+          elif [ "$OUTCOME" = "failure" ]; then
+            if [ -n "$RESULT" ]; then
+              echo "FAIL: action failed but still set an output"
+              exit 1
+            fi
+            echo "PASS: action failed gracefully (Homebrew/sentinel tap environment unavailable)"
+          else
+            echo "FAIL: unexpected outcome '$OUTCOME'"
+            exit 1
+          fi

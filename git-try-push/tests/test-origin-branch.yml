@@ -1,0 +1,85 @@
+name: Test origin_branch rebases on a different remote branch
+on:
+  workflow_dispatch:
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - name: Set up remote with diverged release and upstream branches
+        run: |
+          set -e
+          ROOT="$RUNNER_TEMP/gtp-origin-branch"
+          rm -rf "$ROOT"; mkdir -p "$ROOT"
+          git init --bare "$ROOT/remote.git"
+          git init "$ROOT/clone"
+          cd "$ROOT/clone"
+          git config user.email test@example.com
+          git config user.name "Test User"
+          git checkout -b main
+          echo base > base.txt
+          git add base.txt
+          git commit -m "base"
+          git remote add origin "$ROOT/remote.git"
+          git push origin main:main main:release main:upstream
+          # Another clone diverges release and upstream
+          git clone "$ROOT/remote.git" "$ROOT/other"
+          cd "$ROOT/other"
+          git config user.email other@example.com
+          git config user.name "Other User"
+          git checkout -b release origin/release
+          echo r > release.txt
+          git add release.txt
+          git commit -m "release change"
+          git push origin release
+          git rev-parse HEAD > "$ROOT/release-commit"
+          git checkout -b upstream origin/upstream
+          echo u > upstream.txt
+          git add upstream.txt
+          git commit -m "upstream change"
+          git push origin upstream
+          git rev-parse HEAD > "$ROOT/upstream-commit"
+          # Local diverging commit
+          cd "$ROOT/clone"
+          git fetch origin
+          echo local > local.txt
+          git add local.txt
+          git commit -m "local change"
+          git checkout -b work
+          echo "ROOT=$ROOT" >> "$GITHUB_ENV"
+      - id: action
+        uses: .
+        with:
+          directory: ${{ env.ROOT }}/clone
+          branch: main
+          remote_branch: release
+          origin_branch: upstream
+          force: "true"
+          tries: "3"
+      - name: Assert release was rebased on upstream and force-pushed
+        run: |
+          set -e
+          UPSTREAM_COMMIT="$(cat "$ROOT/upstream-commit")"
+          RELEASE_COMMIT="$(cat "$ROOT/release-commit")"
+          HEAD_MSG="$(git --git-dir="$ROOT/remote.git" log -1 --format=%s refs/heads/release)"
+          echo "remote release head message: $HEAD_MSG"
+          git --git-dir="$ROOT/remote.git" log --oneline refs/heads/release
+          if [ "$HEAD_MSG" != "local change" ]; then
+            echo "FAIL: expected 'local change' at tip of release"
+            exit 1
+          fi
+          if ! git --git-dir="$ROOT/remote.git" merge-base --is-ancestor "$UPSTREAM_COMMIT" refs/heads/release; then
+            echo "FAIL: release was not rebased on upstream (origin_branch)"
+            exit 1
+          fi
+          if git --git-dir="$ROOT/remote.git" merge-base --is-ancestor "$RELEASE_COMMIT" refs/heads/release; then
+            echo "FAIL: release still contains old release commit; expected force push"
+            exit 1
+          fi
+          CUR="$(git -C "$ROOT/clone" rev-parse --abbrev-ref HEAD)"
+          echo "clone current branch: $CUR"
+          if [ "$CUR" != "work" ]; then
+            echo "FAIL: expected to return to previous branch 'work'"
+            exit 1
+          fi
+          echo "PASS"

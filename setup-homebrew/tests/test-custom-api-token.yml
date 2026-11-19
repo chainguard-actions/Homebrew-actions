@@ -1,0 +1,35 @@
+name: Test custom brew-gh-api-token
+on:
+  workflow_dispatch:
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - id: action
+        uses: .
+        with:
+          brew-gh-api-token: ${{ github.token }}
+          stable: "true"
+      - name: Assert token exported to HOMEBREW_GITHUB_API_TOKEN
+        env:
+          EXPECTED: ${{ github.token }}
+        run: |
+          if [ -z "${HOMEBREW_GITHUB_API_TOKEN:-}" ]; then
+            echo "FAIL: HOMEBREW_GITHUB_API_TOKEN not set"
+            exit 1
+          fi
+          if [ -n "$EXPECTED" ] && [ "$HOMEBREW_GITHUB_API_TOKEN" != "$EXPECTED" ]; then
+            echo "FAIL: HOMEBREW_GITHUB_API_TOKEN does not match the provided token"
+            exit 1
+          fi
+          echo "PASS"
+      - name: Assert gems-path output
+        env:
+          ACTUAL: ${{ steps.action.outputs.gems-path }}
+        run: |
+          echo "actual: $ACTUAL"
+          case "$ACTUAL" in
+            */Library/Homebrew/vendor/bundle/ruby/) echo "PASS" ;;
+            *) echo "FAIL: unexpected gems-path"; exit 1 ;;
+          esac

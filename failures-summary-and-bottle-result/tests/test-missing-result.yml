@@ -1,0 +1,39 @@
+name: Test missing and empty result file
+on:
+  workflow_dispatch:
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - id: missing
+        uses: .
+        with:
+          workdir: /tmp/nonexistent-workdir
+          step_name: Missing Heading Marker
+      - name: Create empty result file
+        run: |
+          mkdir -p /tmp/empty-workdir
+          : > /tmp/empty-workdir/empty.txt
+      - id: empty
+        uses: .
+        with:
+          workdir: /tmp/empty-workdir
+          result_path: empty.txt
+          step_name: Empty Heading Marker
+      - name: Assert no-op behaviour
+        env:
+          MISSING_OUTCOME: ${{ steps.missing.outcome }}
+          EMPTY_OUTCOME: ${{ steps.empty.outcome }}
+        run: |
+          echo "missing: $MISSING_OUTCOME empty: $EMPTY_OUTCOME"
+          [ "$MISSING_OUTCOME" = "success" ] || { echo "FAIL: missing outcome"; exit 1; }
+          [ "$EMPTY_OUTCOME" = "success" ] || { echo "FAIL: empty outcome"; exit 1; }
+          [ -e /tmp/empty-workdir/empty.txt ] || { echo "FAIL: empty file should not be removed"; exit 1; }
+          if [ -f "$GITHUB_STEP_SUMMARY" ]; then
+            if grep -qE 'Missing Heading Marker|Empty Heading Marker' "$GITHUB_STEP_SUMMARY"; then
+              echo "FAIL: summary written for missing/empty result"
+              exit 1
+            fi
+          fi
+          echo "PASS"

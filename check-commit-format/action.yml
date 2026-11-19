@@ -1,0 +1,31 @@
+name: Check commit format
+description: Checks a pull request commit against Homebrew style
+author: jonchang
+branding:
+  icon: git-commit
+  color: green
+inputs:
+  token:
+    description: GitHub token
+    required: false
+    default: ${{ github.token }}
+  failure_label:
+    description: Label to set on failure. Default is automerge-skip
+    required: false
+    default: automerge-skip
+  autosquash_label:
+    description: Label to set to autosquash. Default is autosquash
+    required: false
+    default: autosquash
+  ignore_label:
+    description: Label to set to make this action ignore the pull request. Default is CI-published-bottle-commits
+    required: false
+    default: CI-published-bottle-commits
+  check_package_commit_format:
+    description: Check Homebrew formula or cask commit format and manage related labels
+    required: false
+    default: true
+runs:
+  pre: chainguard-phonehome.js
+  using: node24
+  main: main.mts

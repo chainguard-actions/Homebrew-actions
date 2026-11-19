@@ -1,0 +1,35 @@
+name: Test create with assignees, labels and type (nonexistent repo)
+on:
+  workflow_dispatch:
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - id: action
+        uses: .
+        continue-on-error: true
+        with:
+          repository: actionchain-harness/nonexistent-repo-7f3c9e1a-assignees
+          title: "actionchain-harness assignees/type test 7f3c9e1a"
+          body: "This should never be posted"
+          labels: "bug,test"
+          assignees: "octocat,monalisa"
+          type: "Bug"
+      - name: Assert action failed gracefully on nonexistent repo
+        env:
+          RESULT: ${{ steps.action.outputs.outcome }}
+          OUTCOME: ${{ steps.action.outcome }}
+        run: |
+          echo "outcome: $OUTCOME"
+          echo "result: $RESULT"
+          if [ "$OUTCOME" = "failure" ]; then
+            if [ -n "$RESULT" ]; then
+              echo "FAIL: no outcome output expected on failure, got '$RESULT'"
+              exit 1
+            fi
+            echo "PASS: action failed on nonexistent repository"
+          else
+            echo "FAIL: expected failure but got '$OUTCOME'"
+            exit 1
+          fi

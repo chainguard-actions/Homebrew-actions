@@ -1,0 +1,69 @@
+name: Test basic SSH commit signing setup
+on:
+  workflow_dispatch:
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - name: Prepare environment
+        id: prep
+        run: |
+          # The action calls "$GITHUB_ACTION_PATH/../deprecate-master.sh" which lives
+          # in the parent monorepo; provide a no-op stub if it is not present.
+          if [ ! -f "$GITHUB_WORKSPACE/../deprecate-master.sh" ]; then
+            printf '#!/bin/bash\necho "stub deprecate-master: $*"\n' > "$GITHUB_WORKSPACE/../deprecate-master.sh"
+            chmod +x "$GITHUB_WORKSPACE/../deprecate-master.sh"
+          fi
+          git config --global user.email "test@example.com"
+          git config --global user.name "Test User"
+          rm -f /tmp/test_signing_key /tmp/test_signing_key.pub
+          ssh-keygen -t ed25519 -N "" -C "test" -f /tmp/test_signing_key -q
+          {
+            echo "key<<EOF_KEY"
+            cat /tmp/test_signing_key
+            echo "EOF_KEY"
+          } >> "$GITHUB_OUTPUT"
+      - id: action
+        uses: .
+        with:
+          signing_key: ${{ steps.prep.outputs.key }}
+      - name: Assert git config
+        run: |
+          set -e
+          PUB="$(cut -d' ' -f1,2 /tmp/test_signing_key.pub)"
+          FMT="$(git config --global gpg.format)"
+          SIGN="$(git config --global commit.gpgsign)"
+          KEY="$(git config --global user.signingkey)"
+          ASF="$(git config --global gpg.ssh.allowedSignersFile)"
+          echo "gpg.format=$FMT commit.gpgsign=$SIGN signingkey=$KEY allowedSignersFile=$ASF"
+          [ "$FMT" = "ssh" ] || { echo "FAIL: gpg.format"; exit 1; }
+          [ "$SIGN" = "true" ] || { echo "FAIL: commit.gpgsign"; exit 1; }
+          KEY2="$(echo "$KEY" | cut -d' ' -f1,2)"
+          [ "$KEY2" = "$PUB" ] || { echo "FAIL: signingkey mismatch (expected $PUB, got $KEY2)"; exit 1; }
+          [ "$ASF" = "$HOME/.ssh/allowed_signers" ] || { echo "FAIL: allowedSignersFile"; exit 1; }
+          grep -qF "test@example.com $PUB" "$HOME/.ssh/allowed_signers" || { echo "FAIL: allowed_signers entry missing"; cat "$HOME/.ssh/allowed_signers"; exit 1; }
+          echo "PASS"
+      - name: Assert SSH agent has key
+        run: |
+          echo "SSH_AUTH_SOCK=$SSH_AUTH_SOCK"
+          if [ -z "$SSH_AUTH_SOCK" ]; then
+            echo "FAIL: SSH_AUTH_SOCK not exported"
+            exit 1
+          fi
+          FP="$(ssh-keygen -lf /tmp/test_signing_key.pub | awk '{print $2}')"
+          ssh-add -l | tee /tmp/agent_keys
+          grep -qF "$FP" /tmp/agent_keys || { echo "FAIL: key not loaded in agent"; exit 1; }
+          echo "PASS"
+      - name: Assert signed commit verifies
+        run: |
+          set -e
+          rm -rf /tmp/signrepo
+          git init -q /tmp/signrepo
+          cd /tmp/signrepo
+          echo hi > file.txt
+          git add file.txt
+          git commit -q -m "signed commit"
+          git log --show-signature -1
+          git verify-commit HEAD || { echo "FAIL: commit signature did not verify"; exit 1; }
+          echo "PASS"

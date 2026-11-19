@@ -1,0 +1,48 @@
+name: Test push to different remote branch
+on:
+  workflow_dispatch:
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - name: Set up local bare remote and clone
+        run: |
+          set -e
+          ROOT="$RUNNER_TEMP/gtp-remote-branch"
+          rm -rf "$ROOT"; mkdir -p "$ROOT"
+          git init --bare "$ROOT/remote.git"
+          git init "$ROOT/clone"
+          cd "$ROOT/clone"
+          git config user.email test@example.com
+          git config user.name "Test User"
+          git checkout -b feature
+          echo one > file.txt
+          git add file.txt
+          git commit -m "initial"
+          git rev-parse HEAD > "$ROOT/expected"
+          git remote add upstream "$ROOT/remote.git"
+          git checkout -b work
+          echo "ROOT=$ROOT" >> "$GITHUB_ENV"
+      - id: action
+        uses: .
+        with:
+          directory: ${{ env.ROOT }}/clone
+          remote: upstream
+          branch: feature
+          remote_branch: published
+          tries: "2"
+      - name: Assert remote 'published' branch created
+        run: |
+          EXPECTED="$(cat "$ROOT/expected")"
+          ACTUAL="$(git --git-dir="$ROOT/remote.git" rev-parse refs/heads/published)"
+          echo "expected: $EXPECTED actual: $ACTUAL"
+          if [ "$ACTUAL" != "$EXPECTED" ]; then
+            echo "FAIL: remote 'published' not at expected commit"
+            exit 1
+          fi
+          if git --git-dir="$ROOT/remote.git" rev-parse --verify -q refs/heads/feature; then
+            echo "FAIL: 'feature' should not exist on remote"
+            exit 1
+          fi
+          echo "PASS"

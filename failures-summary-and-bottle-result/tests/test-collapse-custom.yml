@@ -1,0 +1,56 @@
+name: Test collapse with custom inputs
+on:
+  workflow_dispatch:
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - name: Create result file in custom location
+        run: |
+          rm -f /tmp/captured-summary-collapse.md
+          mkdir -p /tmp/custom-workdir/out
+          printf 'collapsed-content-marker\n' > /tmp/custom-workdir/out/result.log
+      - id: action
+        uses: .
+        env:
+          GITHUB_STEP_SUMMARY: /tmp/captured-summary-collapse.md
+        with:
+          workdir: /tmp/custom-workdir
+          result_path: out/result.log
+          step_name: Custom Heading Marker
+          collapse: 'true'
+      - name: Assert action step succeeded
+        env:
+          OUTCOME: ${{ steps.action.outcome }}
+        run: |
+          echo "outcome: $OUTCOME"
+          [ "$OUTCOME" = "success" ] || { echo "FAIL: unexpected outcome"; exit 1; }
+          echo "PASS"
+      - name: Assert result file removed
+        run: |
+          if [ -e /tmp/custom-workdir/out/result.log ]; then
+            echo "FAIL: result file still exists"
+            exit 1
+          fi
+          echo "PASS"
+      - name: Assert collapsed summary (if capturable under act)
+        run: |
+          S=""
+          if [ -s /tmp/captured-summary-collapse.md ]; then
+            S=/tmp/captured-summary-collapse.md
+          elif [ -s "$GITHUB_STEP_SUMMARY" ]; then
+            S="$GITHUB_STEP_SUMMARY"
+          fi
+          if [ -z "$S" ]; then
+            echo "NOTE: act resets the step summary for each step and ignored the override; the summary content cannot be checked here (the file-removed check above confirms the action finished)."
+            echo "PASS"
+            exit 0
+          fi
+          echo "summary file: $S"
+          cat "$S"
+          grep -qF '### Custom Heading Marker' "$S" || { echo "FAIL: heading missing"; exit 1; }
+          grep -qF '<details><summary>Details</summary>' "$S" || { echo "FAIL: details open missing"; exit 1; }
+          grep -qF '</details>' "$S" || { echo "FAIL: details close missing"; exit 1; }
+          grep -qF 'collapsed-content-marker' "$S" || { echo "FAIL: content missing"; exit 1; }
+          echo "PASS"

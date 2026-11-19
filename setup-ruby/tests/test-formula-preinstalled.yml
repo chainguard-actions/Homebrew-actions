@@ -1,0 +1,53 @@
+name: Test formula Ruby already installed
+on:
+  workflow_dispatch:
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - name: Set up fake Homebrew with Ruby formula preinstalled
+        run: |
+          bash "$GITHUB_WORKSPACE/tests/fixtures/setup-fake-brew.sh" true
+          echo "/tmp/fake-brew/bin" >> "$GITHUB_PATH"
+          mkdir -p /tmp/ruby-workdir
+      # act reports a parse error for the (skipped) `uses: $/setup-homebrew` step in
+      # action.yml after all real steps succeed, so tolerate the step outcome and
+      # assert on the actual behaviour/outputs below.
+      - id: action
+        uses: .
+        continue-on-error: true
+        with:
+          working-directory: /tmp/ruby-workdir
+      - name: Assert outputs
+        env:
+          OUTCOME: ${{ steps.action.outcome }}
+          RUBY_PATH: ${{ steps.action.outputs.ruby-path }}
+          RUBY_PREFIX: ${{ steps.action.outputs.ruby-prefix }}
+          RUBY_VERSION_OUT: ${{ steps.action.outputs.ruby-version }}
+        run: |
+          echo "outcome: $OUTCOME"
+          echo "ruby-path: $RUBY_PATH"
+          echo "ruby-prefix: $RUBY_PREFIX"
+          echo "ruby-version: $RUBY_VERSION_OUT"
+          cat /tmp/fake-brew/brew.log || true
+          fail=0
+          case "$OUTCOME" in success|failure) ;; *) echo "FAIL: unexpected outcome"; fail=1 ;; esac
+          [ "$RUBY_PATH" = "/tmp/fake-brew/opt/ruby/bin/ruby" ] || { echo "FAIL: ruby-path"; fail=1; }
+          [ "$RUBY_PREFIX" = "/tmp/fake-brew/opt/ruby" ] || { echo "FAIL: ruby-prefix"; fail=1; }
+          [ "$RUBY_VERSION_OUT" = "3.4.7" ] || { echo "FAIL: ruby-version"; fail=1; }
+          if grep -q "^brew install" /tmp/fake-brew/brew.log 2>/dev/null; then
+            echo "FAIL: brew install should not run when Ruby is already present"; fail=1
+          fi
+          if [ -s /tmp/fake-brew/bundle.log ]; then
+            echo "FAIL: bundle should not run without a Gemfile"; fail=1
+          fi
+          [ "$fail" = 0 ] || exit 1
+          echo "PASS"
+      - name: Assert Ruby bin added to PATH
+        run: |
+          echo "PATH: $PATH"
+          case ":$PATH:" in
+            *":/tmp/fake-brew/opt/ruby/bin:"*) echo "PASS" ;;
+            *) echo "FAIL: ruby bin dir not in PATH"; exit 1 ;;
+          esac

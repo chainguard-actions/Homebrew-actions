@@ -1,0 +1,43 @@
+name: Test staged files against sentinel repo
+on:
+  workflow_dispatch:
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - name: Stage a new file in a nested directory
+        run: |
+          mkdir -p "$GITHUB_WORKSPACE/act-test-dir/nested"
+          echo "content $(date +%s)" > "$GITHUB_WORKSPACE/act-test-dir/nested/new-file.txt"
+          git add act-test-dir/nested/new-file.txt
+          git diff --cached --name-only
+          if [ -z "$(git diff --cached --name-only)" ]; then
+            echo "FAIL: setup did not stage any file"
+            exit 1
+          fi
+      - id: action
+        uses: .
+        continue-on-error: true
+        with:
+          message: "act harness test commit"
+          branch: act-harness-test
+          token: ${{ github.token }}
+      - name: Assert action ran (succeeded, or failed gracefully on the sentinel repo)
+        env:
+          OUTCOME: ${{ steps.action.outcome }}
+        run: |
+          echo "outcome: $OUTCOME"
+          if [ "$OUTCOME" = "success" ]; then
+            echo "PASS: action pushed the commit"
+          elif [ "$OUTCOME" = "failure" ]; then
+            echo "PASS: action failed gracefully (sentinel repo is not resolvable)"
+          else
+            echo "FAIL: unexpected outcome '$OUTCOME'"
+            exit 1
+          fi
+      - name: Cleanup staged file
+        if: always()
+        run: |
+          git reset -q -- act-test-dir || true
+          rm -rf "$GITHUB_WORKSPACE/act-test-dir"

@@ -1,0 +1,68 @@
+name: Test basic pre-build
+on:
+  workflow_dispatch:
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - name: Install stub brew (real Homebrew is unavailable under act)
+        run: |
+          mkdir -p "$RUNNER_TEMP/fakebin"
+          cat > "$RUNNER_TEMP/fakebin/brew" <<'EOF'
+          #!/bin/bash
+          echo "$*" >> "${RUNNER_TEMP}/brew-calls.log"
+          echo "stub brew: $*"
+          exit 0
+          EOF
+          chmod +x "$RUNNER_TEMP/fakebin/brew"
+          : > "$RUNNER_TEMP/brew-calls.log"
+          echo "$RUNNER_TEMP/fakebin" >> "$GITHUB_PATH"
+      # The action's nested "uses: $/setup-homebrew" reference cannot be parsed
+      # by act, so act marks the composite as failed even though all of the
+      # action's own shell steps run. Tolerate that, but assert strictly on
+      # the side effects of those steps below.
+      - id: action
+        uses: .
+        continue-on-error: true
+        with:
+          bottles-directory: ${{ runner.temp }}/bottles-basic
+          cleanup: "false"
+          download-bottles: "false"
+      - name: Assert action outcome is success or failure (not skipped)
+        env:
+          OUTCOME: ${{ steps.action.outcome }}
+        run: |
+          echo "outcome: $OUTCOME"
+          if [ "$OUTCOME" != "success" ] && [ "$OUTCOME" != "failure" ]; then
+            echo "FAIL: unexpected outcome '$OUTCOME'"
+            exit 1
+          fi
+          echo "PASS"
+      - name: Assert bottles directory created and empty
+        env:
+          BOTTLES_DIR: ${{ runner.temp }}/bottles-basic
+        run: |
+          echo "bottles dir: $BOTTLES_DIR"
+          if [ ! -d "$BOTTLES_DIR" ]; then
+            echo "FAIL: bottles directory was not created"
+            exit 1
+          fi
+          if [ -n "$(ls -A "$BOTTLES_DIR")" ]; then
+            echo "FAIL: bottles directory is not empty"
+            ls -la "$BOTTLES_DIR"
+            exit 1
+          fi
+          echo "PASS"
+      - name: Assert brew test-bot setup ran and cleanup was skipped
+        run: |
+          cat "$RUNNER_TEMP/brew-calls.log"
+          if ! grep -q -- "test-bot --only-setup" "$RUNNER_TEMP/brew-calls.log"; then
+            echo "FAIL: brew test-bot --only-setup was not invoked"
+            exit 1
+          fi
+          if grep -q -- "--only-cleanup-before" "$RUNNER_TEMP/brew-calls.log"; then
+            echo "FAIL: cleanup ran although cleanup=false"
+            exit 1
+          fi
+          echo "PASS"

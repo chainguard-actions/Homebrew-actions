@@ -1,0 +1,44 @@
+name: Test portable Ruby
+on:
+  workflow_dispatch:
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - name: Set up fake Homebrew
+        run: |
+          bash "$GITHUB_WORKSPACE/tests/fixtures/setup-fake-brew.sh" false
+          echo "/tmp/fake-brew/bin" >> "$GITHUB_PATH"
+          mkdir -p /tmp/ruby-workdir
+      # act reports a parse error for the (skipped) `uses: $/setup-homebrew` step in
+      # action.yml after all real steps succeed, so tolerate the step outcome and
+      # assert on the actual behaviour/outputs below.
+      - id: action
+        uses: .
+        continue-on-error: true
+        with:
+          working-directory: /tmp/ruby-workdir
+          portable-ruby: "true"
+      - name: Assert portable Ruby used
+        env:
+          OUTCOME: ${{ steps.action.outcome }}
+          RUBY_PATH: ${{ steps.action.outputs.ruby-path }}
+          RUBY_PREFIX: ${{ steps.action.outputs.ruby-prefix }}
+          RUBY_VERSION_OUT: ${{ steps.action.outputs.ruby-version }}
+        run: |
+          echo "outcome: $OUTCOME"
+          echo "ruby-path: $RUBY_PATH"
+          echo "ruby-prefix: $RUBY_PREFIX"
+          echo "ruby-version: $RUBY_VERSION_OUT"
+          cat /tmp/fake-brew/brew.log
+          P=/tmp/fake-brew/repo/Library/Homebrew/vendor/portable-ruby/current
+          fail=0
+          case "$OUTCOME" in success|failure) ;; *) echo "FAIL: unexpected outcome"; fail=1 ;; esac
+          grep -q "^brew vendor-install ruby" /tmp/fake-brew/brew.log || { echo "FAIL: vendor-install not called"; fail=1; }
+          if grep -q "^brew install" /tmp/fake-brew/brew.log; then echo "FAIL: formula install should not run"; fail=1; fi
+          [ "$RUBY_PATH" = "$P/bin/ruby" ] || { echo "FAIL: ruby-path"; fail=1; }
+          [ "$RUBY_PREFIX" = "$P" ] || { echo "FAIL: ruby-prefix"; fail=1; }
+          [ "$RUBY_VERSION_OUT" = "3.4.7" ] || { echo "FAIL: ruby-version"; fail=1; }
+          [ "$fail" = 0 ] || exit 1
+          echo "PASS"

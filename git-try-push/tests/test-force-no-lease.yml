@@ -1,0 +1,63 @@
+name: Test force push without lease
+on:
+  workflow_dispatch:
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - name: Set up diverged remote and clone
+        run: |
+          set -e
+          ROOT="$RUNNER_TEMP/gtp-force"
+          rm -rf "$ROOT"; mkdir -p "$ROOT"
+          git init --bare "$ROOT/remote.git"
+          git init "$ROOT/clone"
+          cd "$ROOT/clone"
+          git config user.email test@example.com
+          git config user.name "Test User"
+          git checkout -b main
+          echo base > base.txt
+          git add base.txt
+          git commit -m "base"
+          git remote add origin "$ROOT/remote.git"
+          git push origin main
+          git clone -b main "$ROOT/remote.git" "$ROOT/other"
+          cd "$ROOT/other"
+          git config user.email other@example.com
+          git config user.name "Other User"
+          echo remote > remote.txt
+          git add remote.txt
+          git commit -m "remote change"
+          git push origin main
+          git rev-parse HEAD > "$ROOT/remote-commit"
+          cd "$ROOT/clone"
+          echo local > local.txt
+          git add local.txt
+          git commit -m "local change"
+          git rev-parse HEAD > "$ROOT/expected"
+          git checkout -b work
+          echo "ROOT=$ROOT" >> "$GITHUB_ENV"
+      - id: action
+        uses: .
+        with:
+          directory: ${{ env.ROOT }}/clone
+          branch: main
+          tries: "2"
+          force: "true"
+          no_lease: "true"
+      - name: Assert remote overwritten with local commit
+        run: |
+          EXPECTED="$(cat "$ROOT/expected")"
+          REMOTE_COMMIT="$(cat "$ROOT/remote-commit")"
+          ACTUAL="$(git --git-dir="$ROOT/remote.git" rev-parse refs/heads/main)"
+          echo "expected: $EXPECTED actual: $ACTUAL"
+          if [ "$ACTUAL" != "$EXPECTED" ]; then
+            echo "FAIL: remote main not force-updated to local commit"
+            exit 1
+          fi
+          if git --git-dir="$ROOT/remote.git" merge-base --is-ancestor "$REMOTE_COMMIT" refs/heads/main; then
+            echo "FAIL: remote commit should have been discarded by force push"
+            exit 1
+          fi
+          echo "PASS"

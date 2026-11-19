@@ -1,0 +1,45 @@
+name: Test stable false with debug
+on:
+  workflow_dispatch:
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - id: action
+        uses: .
+        with:
+          stable: "false"
+          debug: "true"
+      - name: Assert gems-hash output
+        env:
+          ACTUAL: ${{ steps.action.outputs.gems-hash }}
+        run: |
+          echo "actual: $ACTUAL"
+          if ! echo "$ACTUAL" | grep -qE '^[0-9a-f]{64}$'; then
+            echo "FAIL: gems-hash is not a sha256 hex digest"
+            exit 1
+          fi
+          echo "PASS"
+      - name: Assert debug env exported and no stable tag
+        run: |
+          echo "HOMEBREW_DEBUG='${HOMEBREW_DEBUG:-}' HOMEBREW_VERBOSE='${HOMEBREW_VERBOSE:-}' HOMEBREW_UPDATE_TO_TAG='${HOMEBREW_UPDATE_TO_TAG:-}'"
+          if [ "${HOMEBREW_DEBUG:-}" != "1" ] || [ "${HOMEBREW_VERBOSE:-}" != "1" ]; then
+            echo "FAIL: expected HOMEBREW_DEBUG=1 and HOMEBREW_VERBOSE=1"
+            exit 1
+          fi
+          if [ -n "${HOMEBREW_UPDATE_TO_TAG:-}" ]; then
+            echo "FAIL: HOMEBREW_UPDATE_TO_TAG should not be set when stable=false"
+            exit 1
+          fi
+          echo "PASS"
+      - name: Assert brew repo on main branch
+        run: |
+          REPO="$(/home/linuxbrew/.linuxbrew/bin/brew --repo)"
+          BRANCH="$(git -C "$REPO" symbolic-ref --short HEAD)"
+          echo "branch: $BRANCH"
+          if [ "$BRANCH" != "main" ]; then
+            echo "FAIL: expected brew repo on 'main' branch"
+            exit 1
+          fi
+          echo "PASS"

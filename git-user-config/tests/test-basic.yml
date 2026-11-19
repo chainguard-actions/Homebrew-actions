@@ -1,0 +1,40 @@
+name: Test basic usage with explicit username
+on:
+  workflow_dispatch:
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - id: action
+        uses: .
+        with:
+          username: octocat
+      - name: Assert outputs and git config
+        env:
+          NAME: ${{ steps.action.outputs.name }}
+          EMAIL: ${{ steps.action.outputs.email }}
+        run: |
+          echo "name: $NAME"
+          echo "email: $EMAIL"
+          if [ "$NAME" != "The Octocat" ]; then
+            echo "FAIL: expected name 'The Octocat'"
+            exit 1
+          fi
+          if [ -z "$EMAIL" ] || ! echo "$EMAIL" | grep -q '@'; then
+            echo "FAIL: email output is empty or invalid"
+            exit 1
+          fi
+          GIT_NAME="$(git config --global user.name)"
+          GIT_EMAIL="$(git config --global user.email)"
+          echo "git user.name: $GIT_NAME"
+          echo "git user.email: $GIT_EMAIL"
+          if [ "$GIT_NAME" != "$NAME" ]; then
+            echo "FAIL: git user.name does not match output"
+            exit 1
+          fi
+          if [ "$GIT_EMAIL" != "$EMAIL" ]; then
+            echo "FAIL: git user.email does not match output"
+            exit 1
+          fi
+          echo "PASS"

@@ -1,0 +1,53 @@
+name: Test basic usage
+on:
+  workflow_dispatch:
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - name: Create result file with ANSI colours
+        run: |
+          rm -f /tmp/captured-summary-basic.md
+          mkdir -p "$GITHUB_WORKSPACE/bottles"
+          printf '\033[31mred-line-marker\033[0m plain\nsecond-line-marker\n' > "$GITHUB_WORKSPACE/bottles/steps_output.txt"
+      - id: action
+        uses: .
+        env:
+          GITHUB_STEP_SUMMARY: /tmp/captured-summary-basic.md
+      - name: Assert action step succeeded
+        env:
+          OUTCOME: ${{ steps.action.outcome }}
+        run: |
+          echo "outcome: $OUTCOME"
+          [ "$OUTCOME" = "success" ] || { echo "FAIL: unexpected outcome"; exit 1; }
+          echo "PASS"
+      - name: Assert result file removed
+        run: |
+          if [ -e "$GITHUB_WORKSPACE/bottles/steps_output.txt" ]; then
+            echo "FAIL: result file still exists"
+            exit 1
+          fi
+          echo "PASS"
+      - name: Assert step summary content (if capturable under act)
+        run: |
+          S=""
+          if [ -s /tmp/captured-summary-basic.md ]; then
+            S=/tmp/captured-summary-basic.md
+          elif [ -s "$GITHUB_STEP_SUMMARY" ]; then
+            S="$GITHUB_STEP_SUMMARY"
+          fi
+          if [ -z "$S" ]; then
+            echo "NOTE: act resets the step summary for each step and ignored the override; the summary content cannot be checked here (the file-removed check above confirms the action finished)."
+            echo "PASS"
+            exit 0
+          fi
+          echo "summary file: $S"
+          cat "$S"
+          grep -qF '### `brew test-bot` output' "$S" || { echo "FAIL: heading missing"; exit 1; }
+          grep -qF 'red-line-marker plain' "$S" || { echo "FAIL: stripped content missing"; exit 1; }
+          grep -qF 'second-line-marker' "$S" || { echo "FAIL: second line missing"; exit 1; }
+          if grep -q $'\033' "$S"; then echo "FAIL: ANSI codes not stripped"; exit 1; fi
+          if grep -qF '<details>' "$S"; then echo "FAIL: unexpected collapse"; exit 1; fi
+          grep -qF '```' "$S" || { echo "FAIL: code fence missing"; exit 1; }
+          echo "PASS"
