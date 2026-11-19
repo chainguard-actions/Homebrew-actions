@@ -1,0 +1,37 @@
+name: Test bot user falls back to login and noreply email
+on:
+  workflow_dispatch:
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - id: action
+        uses: .
+        with:
+          username: github-actions[bot]
+      - name: Assert outputs
+        env:
+          NAME: ${{ steps.action.outputs.name }}
+          EMAIL: ${{ steps.action.outputs.email }}
+        run: |
+          echo "name: $NAME"
+          echo "email: $EMAIL"
+          if [ "$NAME" != "github-actions[bot]" ]; then
+            echo "FAIL: expected name 'github-actions[bot]'"
+            exit 1
+          fi
+          if [ "$EMAIL" != "41898282+github-actions[bot]@users.noreply.github.com" ]; then
+            echo "FAIL: unexpected email"
+            exit 1
+          fi
+          echo "PASS"
+      - name: Assert git global config
+        run: |
+          GN="$(git config --global user.name)"
+          GE="$(git config --global user.email)"
+          echo "git user.name: $GN"
+          echo "git user.email: $GE"
+          [ "$GN" = "github-actions[bot]" ] || { echo "FAIL: user.name"; exit 1; }
+          [ "$GE" = "41898282+github-actions[bot]@users.noreply.github.com" ] || { echo "FAIL: user.email"; exit 1; }
+          echo "PASS"

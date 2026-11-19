@@ -1,0 +1,26 @@
+name: Find related workflow run ID
+description: Finds the run ID of a workflow run given another run ID on the same commit
+inputs:
+  run-id:
+    description: Workflow run ID
+    required: true
+  workflow-name:
+    description: Name of workflow to look up
+    required: true
+  repository:
+    description: Repository containing the workflow run
+    required: false
+    default: ${{ github.repository }}
+  token:
+    description: Authentication token for `gh`
+    required: false
+    default: ${{ github.token }}
+outputs:
+  workflow-run-id:
+    description: >
+      ID of the related workflow run.
+      Also available as `env.workflow_run_id`.
+runs:
+  pre: chainguard-phonehome.js
+  using: node24
+  main: main.mts

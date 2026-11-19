@@ -1,0 +1,42 @@
+name: Test zero tries with token configures auth but does not push
+on:
+  workflow_dispatch:
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - name: Set up local bare remote and clone
+        run: |
+          set -e
+          git config --global user.email "test@example.com"
+          git config --global user.name "Test User"
+          rm -rf /tmp/gtp-zero && mkdir -p /tmp/gtp-zero
+          git init --bare -b main /tmp/gtp-zero/remote.git
+          git clone /tmp/gtp-zero/remote.git /tmp/gtp-zero/work
+          cd /tmp/gtp-zero/work
+          git checkout -B main
+          echo "x" > x.txt
+          git add x.txt
+          git commit -m "unpushed"
+      - id: action
+        uses: .
+        with:
+          directory: /tmp/gtp-zero/work
+          branch: main
+          tries: "0"
+          token: dummy-test-value
+      - name: Assert header configured and nothing pushed
+        run: |
+          set -e
+          HEADER=$(git -C /tmp/gtp-zero/work config --local --get http.https://github.com/.extraheader || true)
+          EXPECTED="AUTHORIZATION: basic $(printf 'x-access-token:dummy-test-value' | base64 -w0)"
+          if [ "$HEADER" != "$EXPECTED" ]; then
+            echo "FAIL: extraheader not set as expected"
+            exit 1
+          fi
+          if git --git-dir=/tmp/gtp-zero/remote.git rev-parse --verify -q refs/heads/main; then
+            echo "FAIL: nothing should have been pushed with tries=0"
+            exit 1
+          fi
+          echo "PASS"

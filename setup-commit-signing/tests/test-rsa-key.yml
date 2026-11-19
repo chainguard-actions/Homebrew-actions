@@ -1,0 +1,42 @@
+name: Test RSA key signing setup
+on:
+  workflow_dispatch:
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - name: Generate RSA key and configure git identity
+        id: keygen
+        run: |
+          git config --global user.email "rsa@example.com"
+          git config --global user.name "RSA User"
+          tmp="$(mktemp -d)"
+          ssh-keygen -q -t rsa -b 3072 -N "" -C "rsa@example.com" -f "$tmp/key"
+          {
+            echo "key<<EOF_SIGNING_KEY"
+            cat "$tmp/key"
+            echo "EOF_SIGNING_KEY"
+          } >> "$GITHUB_OUTPUT"
+          echo "pubkey=$(cut -d' ' -f1,2 "$tmp/key.pub")" >> "$GITHUB_OUTPUT"
+      - id: action
+        uses: .
+        with:
+          signing_key: ${{ steps.keygen.outputs.key }}
+      - name: Assert config and agent
+        env:
+          PUBKEY: ${{ steps.keygen.outputs.pubkey }}
+        run: |
+          skey="$(git config --global user.signingkey)"
+          echo "signingkey=$skey"
+          case "$skey" in
+            ssh-rsa*) ;;
+            *) echo "FAIL: expected ssh-rsa signing key"; exit 1 ;;
+          esac
+          case "$skey" in
+            "$PUBKEY"*) ;;
+            *) echo "FAIL: signingkey mismatch"; exit 1 ;;
+          esac
+          grep -qF "rsa@example.com $PUBKEY" ~/.ssh/allowed_signers || { echo "FAIL: allowed_signers"; exit 1; }
+          ssh-add -l | grep -qi "RSA" || { echo "FAIL: RSA key not in agent"; exit 1; }
+          echo "PASS"

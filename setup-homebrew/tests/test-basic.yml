@@ -1,0 +1,56 @@
+name: Test basic usage
+on:
+  workflow_dispatch:
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - id: action
+        uses: .
+      - name: Assert gems outputs
+        env:
+          GEMS_PATH: ${{ steps.action.outputs.gems-path }}
+          GEMS_HASH: ${{ steps.action.outputs.gems-hash }}
+          REPO_PATH: ${{ steps.action.outputs.repository-path }}
+          TAP_NAME: ${{ steps.action.outputs.tap-name }}
+        run: |
+          echo "gems-path: $GEMS_PATH"
+          echo "gems-hash: $GEMS_HASH"
+          echo "repository-path: $REPO_PATH"
+          echo "tap-name: $TAP_NAME"
+          case "$GEMS_PATH" in
+            */Library/Homebrew/vendor/bundle/ruby/) ;;
+            *) echo "FAIL: unexpected gems-path"; exit 1 ;;
+          esac
+          if ! echo "$GEMS_HASH" | grep -qE '^[0-9a-f]{64}$'; then
+            echo "FAIL: gems-hash is not a sha256"
+            exit 1
+          fi
+          if [ -n "$TAP_NAME" ]; then
+            echo "FAIL: tap-name should be empty for a non-tap repository"
+            exit 1
+          fi
+          echo "PASS"
+      - name: Assert brew works and stable mode is enabled by default
+        run: |
+          BREW="$(command -v brew || echo /home/linuxbrew/.linuxbrew/bin/brew)"
+          echo "brew: $BREW"
+          if [ ! -x "$BREW" ]; then
+            echo "FAIL: brew executable not found"
+            exit 1
+          fi
+          "$BREW" --version
+          echo "HOMEBREW_UPDATE_TO_TAG=${HOMEBREW_UPDATE_TO_TAG:-}"
+          if [ "${HOMEBREW_UPDATE_TO_TAG:-}" != "1" ]; then
+            echo "FAIL: expected HOMEBREW_UPDATE_TO_TAG=1 (stable auto -> true)"
+            exit 1
+          fi
+          REPO="$("$BREW" --repo)"
+          BRANCH="$(git -C "$REPO" symbolic-ref --short HEAD)"
+          echo "brew repo branch: $BRANCH"
+          if [ "$BRANCH" != "stable" ]; then
+            echo "FAIL: expected brew repo on 'stable' branch"
+            exit 1
+          fi
+          echo "PASS"

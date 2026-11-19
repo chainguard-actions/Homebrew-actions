@@ -1,0 +1,61 @@
+name: Test retry with rebase after rejected push
+on:
+  workflow_dispatch:
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - name: Set up diverged local and remote
+        run: |
+          set -e
+          git config --global user.email "test@example.com"
+          git config --global user.name "Test User"
+          rm -rf /tmp/gtp-retry && mkdir -p /tmp/gtp-retry
+          git init --bare -b main /tmp/gtp-retry/remote.git
+          git clone /tmp/gtp-retry/remote.git /tmp/gtp-retry/work
+          cd /tmp/gtp-retry/work
+          git checkout -B main
+          echo "base" > base.txt
+          git add base.txt
+          git commit -m "base"
+          git push origin main
+          # Another clone pushes a concurrent commit
+          git clone /tmp/gtp-retry/remote.git /tmp/gtp-retry/other
+          cd /tmp/gtp-retry/other
+          git checkout main
+          echo "other" > other.txt
+          git add other.txt
+          git commit -m "concurrent commit"
+          git push origin main
+          # Local makes a non-conflicting commit
+          cd /tmp/gtp-retry/work
+          echo "local" > local.txt
+          git add local.txt
+          git commit -m "local commit"
+      - id: action
+        uses: .
+        with:
+          directory: /tmp/gtp-retry/work
+          branch: main
+          tries: "3"
+      - name: Assert both commits on remote
+        run: |
+          set -e
+          LOG=$(git --git-dir=/tmp/gtp-retry/remote.git log --format=%s main)
+          echo "remote log:"
+          echo "$LOG"
+          if ! echo "$LOG" | grep -qx "local commit"; then
+            echo "FAIL: local commit missing on remote"
+            exit 1
+          fi
+          if ! echo "$LOG" | grep -qx "concurrent commit"; then
+            echo "FAIL: concurrent commit missing on remote"
+            exit 1
+          fi
+          HEAD_MSG=$(git --git-dir=/tmp/gtp-retry/remote.git log -1 --format=%s main)
+          if [ "$HEAD_MSG" != "local commit" ]; then
+            echo "FAIL: expected local commit rebased on top, got '$HEAD_MSG'"
+            exit 1
+          fi
+          echo "PASS"

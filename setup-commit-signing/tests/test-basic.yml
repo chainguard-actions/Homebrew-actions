@@ -1,0 +1,70 @@
+name: Test basic ed25519 signing setup
+on:
+  workflow_dispatch:
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - name: Generate key and configure git identity
+        id: keygen
+        run: |
+          git config --global user.email "test@example.com"
+          git config --global user.name "Test User"
+          tmp="$(mktemp -d)"
+          ssh-keygen -q -t ed25519 -N "" -C "test@example.com" -f "$tmp/key"
+          {
+            echo "key<<EOF_SIGNING_KEY"
+            cat "$tmp/key"
+            echo "EOF_SIGNING_KEY"
+          } >> "$GITHUB_OUTPUT"
+          echo "pubkey=$(cut -d' ' -f1,2 "$tmp/key.pub")" >> "$GITHUB_OUTPUT"
+      - id: action
+        uses: .
+        with:
+          signing_key: ${{ steps.keygen.outputs.key }}
+      - name: Assert git config
+        env:
+          PUBKEY: ${{ steps.keygen.outputs.pubkey }}
+        run: |
+          fmt="$(git config --global gpg.format)"
+          sign="$(git config --global commit.gpgsign)"
+          skey="$(git config --global user.signingkey)"
+          asf="$(git config --global gpg.ssh.allowedSignersFile)"
+          echo "gpg.format=$fmt commit.gpgsign=$sign signingkey=$skey allowedSignersFile=$asf"
+          [ "$fmt" = "ssh" ] || { echo "FAIL: gpg.format"; exit 1; }
+          [ "$sign" = "true" ] || { echo "FAIL: commit.gpgsign"; exit 1; }
+          case "$skey" in
+            "$PUBKEY"*) ;;
+            *) echo "FAIL: signingkey mismatch (expected $PUBKEY)"; exit 1 ;;
+          esac
+          [ -n "$asf" ] || { echo "FAIL: allowedSignersFile unset"; exit 1; }
+          echo "PASS"
+      - name: Assert allowed_signers entry
+        env:
+          PUBKEY: ${{ steps.keygen.outputs.pubkey }}
+        run: |
+          cat ~/.ssh/allowed_signers
+          if ! grep -qF "test@example.com $PUBKEY" ~/.ssh/allowed_signers; then
+            echo "FAIL: allowed_signers missing expected entry"
+            exit 1
+          fi
+          echo "PASS"
+      - name: Assert key loaded into ssh-agent
+        run: |
+          echo "SSH_AUTH_SOCK=$SSH_AUTH_SOCK SSH_AGENT_PID=$SSH_AGENT_PID"
+          [ -n "$SSH_AUTH_SOCK" ] || { echo "FAIL: SSH_AUTH_SOCK not exported"; exit 1; }
+          ssh-add -l || { echo "FAIL: no keys in agent"; exit 1; }
+          ssh-add -l | grep -qi "ED25519" || { echo "FAIL: ed25519 key not in agent"; exit 1; }
+          echo "PASS"
+      - name: Assert signed commit verifies
+        run: |
+          repo="$(mktemp -d)"
+          cd "$repo"
+          git init -q
+          echo hi > f
+          git add f
+          git commit -q -m "signed commit"
+          git log --show-signature -1
+          git verify-commit HEAD || { echo "FAIL: commit signature does not verify"; exit 1; }
+          echo "PASS"

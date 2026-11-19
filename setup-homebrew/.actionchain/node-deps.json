@@ -1,0 +1,13 @@
+{
+  "status": "bundled",
+  "entries": [
+    {
+      "path": "main.mts",
+      "status": "bundled"
+    },
+    {
+      "path": "post.mts",
+      "status": "bundled"
+    }
+  ]
+}

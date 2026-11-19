@@ -1,0 +1,42 @@
+name: Test rejects ruby_source_path outside the tap
+on:
+  workflow_dispatch:
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - name: Set up fake brew and tap
+        run: bash "$GITHUB_WORKSPACE/tests/fixtures/setup-fake-brew.sh" Formula
+      - name: Populate tap fixtures
+        run: |
+          OLD="$(date -d '13 months ago' +%F)"
+          echo "# keep" > "$TAP_DIR/Formula/keep.rb"
+          echo "outside" > "$FAKE_ROOT/outside.rb"
+          cat > "$FAKE_ROOT/formulae.json" <<EOF
+          {"formulae":[
+            {"name":"unsafe","tap":"$TARGET_TAP","disabled":true,"disable_date":"$OLD","ruby_source_path":"../outside.rb"}
+          ]}
+          EOF
+          git -C "$TAP_DIR" add --all
+          git -C "$TAP_DIR" commit --quiet -m "Add fixtures"
+      - id: action
+        uses: .
+        continue-on-error: true
+      - name: Assert action failed and did not delete outside file
+        env:
+          OUTCOME: ${{ steps.action.outcome }}
+          ACTUAL: ${{ steps.action.outputs.packages-removed }}
+        run: |
+          echo "outcome: $OUTCOME"
+          echo "packages-removed: $ACTUAL"
+          if [ "$OUTCOME" != "failure" ]; then
+            echo "FAIL: expected the action to fail on an escaping ruby_source_path"; exit 1
+          fi
+          if [ ! -f "$FAKE_ROOT/outside.rb" ]; then
+            echo "FAIL: file outside the tap was deleted"; exit 1
+          fi
+          if [ -n "$ACTUAL" ]; then
+            echo "FAIL: no output expected on failure"; exit 1
+          fi
+          echo "PASS"

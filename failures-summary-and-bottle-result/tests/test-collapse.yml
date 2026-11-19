@@ -1,0 +1,43 @@
+name: Test collapse with custom path and heading
+on:
+  workflow_dispatch:
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - name: Create result file
+        run: |
+          mkdir -p "$RUNNER_TEMP/cwork/out"
+          printf 'collapsed content here\n' > "$RUNNER_TEMP/cwork/out/result.log"
+          printf 'keep me\n' > "$RUNNER_TEMP/cwork/out/other.log"
+          echo "WORKDIR=$RUNNER_TEMP/cwork" >> "$GITHUB_ENV"
+      - id: action
+        uses: .
+        with:
+          workdir: ${{ env.WORKDIR }}
+          result_path: out/result.log
+          step_name: My Custom Heading
+          collapse: 'true'
+      - name: Assert action succeeded
+        env:
+          OUTCOME: ${{ steps.action.outcome }}
+        run: |
+          echo "outcome: $OUTCOME"
+          if [ "$OUTCOME" != "success" ]; then
+            echo "FAIL: expected success"
+            exit 1
+          fi
+          echo "PASS"
+      - name: Assert only the custom result file was removed
+        run: |
+          # act resets GITHUB_STEP_SUMMARY per step, so we verify side effects.
+          if [ -e "$WORKDIR/out/result.log" ]; then
+            echo "FAIL: result file still exists"
+            exit 1
+          fi
+          if [ ! -f "$WORKDIR/out/other.log" ]; then
+            echo "FAIL: unrelated file was removed"
+            exit 1
+          fi
+          echo "PASS"

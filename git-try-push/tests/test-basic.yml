@@ -1,0 +1,55 @@
+name: Test basic push
+on:
+  workflow_dispatch:
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - name: Set up local bare remote and clone
+        run: |
+          set -e
+          git config --global user.email "test@example.com"
+          git config --global user.name "Test User"
+          git config --global init.defaultBranch main
+          rm -rf /tmp/gtp-basic && mkdir -p /tmp/gtp-basic
+          git init --bare -b main /tmp/gtp-basic/remote.git
+          git clone /tmp/gtp-basic/remote.git /tmp/gtp-basic/work
+          cd /tmp/gtp-basic/work
+          git checkout -B main
+          echo "one" > file.txt
+          git add file.txt
+          git commit -m "first commit"
+          git push origin main
+          echo "two" >> file.txt
+          git commit -am "second commit"
+          # Switch to another branch so the action has to checkout main and back
+          git checkout -b other
+      - id: action
+        uses: .
+        with:
+          directory: /tmp/gtp-basic/work
+          branch: main
+          tries: "3"
+      - name: Assert remote has local commit and branch restored
+        run: |
+          set -e
+          cd /tmp/gtp-basic/work
+          LOCAL=$(git rev-parse main)
+          REMOTE=$(git --git-dir=/tmp/gtp-basic/remote.git rev-parse main)
+          CURRENT=$(git rev-parse --abbrev-ref HEAD)
+          echo "local: $LOCAL remote: $REMOTE current: $CURRENT"
+          if [ "$LOCAL" != "$REMOTE" ]; then
+            echo "FAIL: remote main does not match local main"
+            exit 1
+          fi
+          MSG=$(git --git-dir=/tmp/gtp-basic/remote.git log -1 --format=%s main)
+          if [ "$MSG" != "second commit" ]; then
+            echo "FAIL: unexpected remote head message '$MSG'"
+            exit 1
+          fi
+          if [ "$CURRENT" != "other" ]; then
+            echo "FAIL: expected to be back on 'other' branch"
+            exit 1
+          fi
+          echo "PASS"

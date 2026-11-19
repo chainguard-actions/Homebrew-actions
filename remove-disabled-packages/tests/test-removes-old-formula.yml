@@ -1,0 +1,77 @@
+name: Test removes formula disabled over a year ago
+on:
+  workflow_dispatch:
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - name: Provision Ruby >= 3.1 (act skips the action's setup-ruby step)
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: bash "$GITHUB_WORKSPACE/tests/fixtures/setup-modern-ruby.sh"
+      - name: Set up fake brew and tap
+        run: bash "$GITHUB_WORKSPACE/tests/fixtures/setup-fake-brew.sh" Formula
+      - name: Populate tap fixtures
+        run: |
+          OLD="$(date -d '13 months ago' +%F)"
+          RECENT="$(date -d '6 months ago' +%F)"
+          for f in old recent active foreign; do
+            echo "# $f" > "$TAP_DIR/Formula/$f.rb"
+          done
+          cat > "$FAKE_ROOT/formulae.json" <<EOF
+          {"formulae":[
+            {"name":"old","tap":"$TARGET_TAP","disabled":true,"disable_date":"$OLD","ruby_source_path":"Formula/old.rb"},
+            {"name":"recent","tap":"$TARGET_TAP","disabled":true,"disable_date":"$RECENT","ruby_source_path":"Formula/recent.rb"},
+            {"name":"active","tap":"$TARGET_TAP","disabled":false,"disable_date":"$OLD","ruby_source_path":"Formula/active.rb"},
+            {"name":"foreign","tap":"someone/else","disabled":true,"disable_date":"$OLD","ruby_source_path":"Formula/foreign.rb"}
+          ]}
+          EOF
+          cat "$FAKE_ROOT/formulae.json"
+          git -C "$TAP_DIR" add --all
+          git -C "$TAP_DIR" commit --quiet -m "Add fixtures"
+      # act cannot resolve the action's internal `$/setup-ruby` reference and
+      # marks the composite step failed even when main.rb succeeds, so the
+      # outcome itself is not asserted strictly; the output and tap state are.
+      - id: action
+        uses: .
+        continue-on-error: true
+      - name: Assert step ran and packages-removed is true
+        env:
+          ACTUAL: ${{ steps.action.outputs.packages-removed }}
+          OUTCOME: ${{ steps.action.outcome }}
+        run: |
+          echo "outcome: $OUTCOME"
+          echo "actual: $ACTUAL"
+          if [ "$OUTCOME" != "success" ] && [ "$OUTCOME" != "failure" ]; then
+            echo "FAIL: unexpected outcome '$OUTCOME'"; exit 1
+          fi
+          if [ "$ACTUAL" != "true" ]; then
+            echo "FAIL: expected 'true'"
+            exit 1
+          fi
+          echo "PASS"
+      - name: Assert correct files removed and kept
+        run: |
+          ls -la "$TAP_DIR/Formula"
+          if [ -e "$TAP_DIR/Formula/old.rb" ]; then
+            echo "FAIL: old.rb should have been removed"; exit 1
+          fi
+          for f in recent active foreign; do
+            if [ ! -f "$TAP_DIR/Formula/$f.rb" ]; then
+              echo "FAIL: $f.rb should have been kept"; exit 1
+            fi
+          done
+          echo "PASS"
+      - name: Assert removal commit created
+        run: |
+          LOG="$(git -C "$TAP_DIR" log --format=%s)"
+          echo "$LOG"
+          EXPECTED="$(printf 'old: remove formula\nAdd fixtures')"
+          if [ "$LOG" != "$EXPECTED" ]; then
+            echo "FAIL: unexpected commit log"; exit 1
+          fi
+          if [ -n "$(git -C "$TAP_DIR" status --porcelain)" ]; then
+            echo "FAIL: working tree not clean"; exit 1
+          fi
+          echo "PASS"

@@ -1,0 +1,55 @@
+name: Test force push without lease
+on:
+  workflow_dispatch:
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - name: Set up diverged local and remote
+        run: |
+          set -e
+          git config --global user.email "test@example.com"
+          git config --global user.name "Test User"
+          rm -rf /tmp/gtp-force && mkdir -p /tmp/gtp-force
+          git init --bare -b main /tmp/gtp-force/remote.git
+          git clone /tmp/gtp-force/remote.git /tmp/gtp-force/work
+          cd /tmp/gtp-force/work
+          git checkout -B main
+          echo "base" > base.txt
+          git add base.txt
+          git commit -m "base"
+          git push origin main
+          git clone /tmp/gtp-force/remote.git /tmp/gtp-force/other
+          cd /tmp/gtp-force/other
+          git checkout main
+          echo "remote-only" > remote.txt
+          git add remote.txt
+          git commit -m "remote only commit"
+          git push origin main
+          cd /tmp/gtp-force/work
+          echo "rewritten" > base.txt
+          git commit -a --amend -m "rewritten base"
+      - id: action
+        uses: .
+        with:
+          directory: /tmp/gtp-force/work
+          branch: main
+          tries: "2"
+          force: "true"
+          no_lease: "true"
+      - name: Assert remote overwritten by local
+        run: |
+          set -e
+          LOCAL=$(git -C /tmp/gtp-force/work rev-parse main)
+          REMOTE=$(git --git-dir=/tmp/gtp-force/remote.git rev-parse main)
+          echo "local: $LOCAL remote: $REMOTE"
+          if [ "$LOCAL" != "$REMOTE" ]; then
+            echo "FAIL: remote not force-updated"
+            exit 1
+          fi
+          if git --git-dir=/tmp/gtp-force/remote.git log --format=%s main | grep -qx "remote only commit"; then
+            echo "FAIL: remote-only commit should have been discarded"
+            exit 1
+          fi
+          echo "PASS"

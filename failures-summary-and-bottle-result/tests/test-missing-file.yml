@@ -1,0 +1,39 @@
+name: Test missing and empty result file
+on:
+  workflow_dispatch:
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - name: Prepare workdir with empty file
+        run: |
+          mkdir -p "$RUNNER_TEMP/ework/bottles"
+          : > "$RUNNER_TEMP/ework/bottles/empty.txt"
+          echo "WORKDIR=$RUNNER_TEMP/ework" >> "$GITHUB_ENV"
+      - id: missing
+        uses: .
+        with:
+          workdir: ${{ env.WORKDIR }}
+          result_path: bottles/does-not-exist.txt
+          step_name: MissingHeadingXYZ
+      - id: empty
+        uses: .
+        with:
+          workdir: ${{ env.WORKDIR }}
+          result_path: bottles/empty.txt
+          step_name: EmptyHeadingXYZ
+      - name: Assert no-op
+        env:
+          MISSING_OUTCOME: ${{ steps.missing.outcome }}
+          EMPTY_OUTCOME: ${{ steps.empty.outcome }}
+        run: |
+          echo "missing: $MISSING_OUTCOME empty: $EMPTY_OUTCOME"
+          [ "$MISSING_OUTCOME" = "success" ] || { echo "FAIL: missing outcome"; exit 1; }
+          [ "$EMPTY_OUTCOME" = "success" ] || { echo "FAIL: empty outcome"; exit 1; }
+          [ -e "$WORKDIR/bottles/empty.txt" ] || { echo "FAIL: empty file should not be removed"; exit 1; }
+          if [ -f "$GITHUB_STEP_SUMMARY" ] && grep -qE 'MissingHeadingXYZ|EmptyHeadingXYZ' "$GITHUB_STEP_SUMMARY"; then
+            echo "FAIL: summary should not contain headings"
+            exit 1
+          fi
+          echo "PASS"

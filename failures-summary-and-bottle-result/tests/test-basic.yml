@@ -1,0 +1,41 @@
+name: Test basic usage
+on:
+  workflow_dispatch:
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - name: Create result file
+        run: |
+          mkdir -p "$RUNNER_TEMP/work/bottles"
+          printf 'line one\n\033[31mred text\033[0m\nline three\n' > "$RUNNER_TEMP/work/bottles/steps_output.txt"
+          echo "WORKDIR=$RUNNER_TEMP/work" >> "$GITHUB_ENV"
+      - id: action
+        uses: .
+        with:
+          workdir: ${{ env.WORKDIR }}
+      - name: Assert action succeeded
+        env:
+          OUTCOME: ${{ steps.action.outcome }}
+        run: |
+          echo "outcome: $OUTCOME"
+          if [ "$OUTCOME" != "success" ]; then
+            echo "FAIL: expected success"
+            exit 1
+          fi
+          echo "PASS"
+      - name: Assert result file removed (script ran to completion under set -e)
+        run: |
+          # Note: act gives each step a fresh GITHUB_STEP_SUMMARY file, so the
+          # summary written by the action cannot be read from a later step.
+          # The final 'rm' only runs if all summary writes succeeded.
+          if [ -e "$WORKDIR/bottles/steps_output.txt" ]; then
+            echo "FAIL: result file still exists"
+            exit 1
+          fi
+          if [ ! -d "$WORKDIR/bottles" ]; then
+            echo "FAIL: parent directory should remain"
+            exit 1
+          fi
+          echo "PASS"

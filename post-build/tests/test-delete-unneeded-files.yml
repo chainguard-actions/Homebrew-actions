@@ -1,0 +1,54 @@
+name: Test delete unneeded files (no cleanup, no bottle upload)
+on:
+  workflow_dispatch:
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - name: Prepare bottles and logs directories
+        run: |
+          B="$GITHUB_WORKSPACE/test-bottles"
+          L="$GITHUB_WORKSPACE/test-logs"
+          rm -rf "$B" "$L"
+          mkdir -p "$B/logs" "$B/home" "$B/failed" "$B/artifact-cache" "$L"
+          echo '{}' > "$B/foo--1.0.x86_64_linux.bottle.json"
+          echo 'bottle' > "$B/foo--1.0.x86_64_linux.bottle.tar.gz"
+          echo 'foo' > "$B/tested-dependents-foo.txt"
+          echo 'log' > "$B/logs/test.log"
+          echo 'log' > "$L/build.log"
+      - id: action
+        uses: .
+        continue-on-error: true
+        with:
+          bottles-directory: ${{ github.workspace }}/test-bottles
+          logs-directory: ${{ github.workspace }}/test-logs
+          runner: test-runner
+          cleanup: "false"
+          upload-bottles: "false"
+      - name: Assert unneeded files were deleted and bottles kept
+        env:
+          OUTCOME: ${{ steps.action.outcome }}
+        run: |
+          echo "outcome: $OUTCOME"
+          B="$GITHUB_WORKSPACE/test-bottles"
+          ls -la "$B" || true
+          if [ ! -d "$B" ]; then
+            echo "FAIL: bottles directory removed although cleanup=false"
+            exit 1
+          fi
+          for d in logs home failed artifact-cache; do
+            if [ -e "$B/$d" ]; then
+              echo "FAIL: $d should have been deleted"
+              exit 1
+            fi
+          done
+          if ls "$B"/tested-dependents-*.txt >/dev/null 2>&1; then
+            echo "FAIL: tested-dependents-*.txt should have been deleted"
+            exit 1
+          fi
+          if [ ! -f "$B/foo--1.0.x86_64_linux.bottle.json" ] || [ ! -f "$B/foo--1.0.x86_64_linux.bottle.tar.gz" ]; then
+            echo "FAIL: bottle files should have been kept"
+            exit 1
+          fi
+          echo "PASS"

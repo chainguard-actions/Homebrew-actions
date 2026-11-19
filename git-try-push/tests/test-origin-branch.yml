@@ -1,0 +1,77 @@
+name: Test force push rebasing on a separate origin_branch
+on:
+  workflow_dispatch:
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - name: Set up remote with main and diverged feature branch
+        run: |
+          set -e
+          git config --global user.email "test@example.com"
+          git config --global user.name "Test User"
+          rm -rf /tmp/gtp-origin && mkdir -p /tmp/gtp-origin
+          git init --bare -b main /tmp/gtp-origin/remote.git
+          # Seed remote: main=base, feature=base+old feature commit
+          git clone /tmp/gtp-origin/remote.git /tmp/gtp-origin/seed
+          cd /tmp/gtp-origin/seed
+          git checkout -B main
+          echo "base" > base.txt
+          git add base.txt
+          git commit -m "base"
+          git push origin main
+          git checkout -b feature
+          echo "old" > old.txt
+          git add old.txt
+          git commit -m "old feature commit"
+          git push origin feature
+          # Working clone: rewrite feature from main with a new local commit
+          git clone /tmp/gtp-origin/remote.git /tmp/gtp-origin/work
+          cd /tmp/gtp-origin/work
+          git checkout main
+          git checkout -b feature origin/main
+          echo "local" > local.txt
+          git add local.txt
+          git commit -m "local commit"
+          # Meanwhile, main advances upstream
+          cd /tmp/gtp-origin/seed
+          git checkout main
+          echo "upstream" > upstream.txt
+          git add upstream.txt
+          git commit -m "upstream main commit"
+          git push origin main
+      - id: action
+        uses: .
+        with:
+          directory: /tmp/gtp-origin/work
+          branch: feature
+          remote_branch: feature
+          origin_branch: main
+          force: "true"
+          tries: "3"
+      - name: Assert feature was rebased on main and force-pushed
+        run: |
+          set -e
+          LOG=$(git --git-dir=/tmp/gtp-origin/remote.git log --format=%s feature)
+          echo "remote feature log:"
+          echo "$LOG"
+          HEAD_MSG=$(git --git-dir=/tmp/gtp-origin/remote.git log -1 --format=%s feature)
+          if [ "$HEAD_MSG" != "local commit" ]; then
+            echo "FAIL: expected 'local commit' at tip of feature, got '$HEAD_MSG'"
+            exit 1
+          fi
+          if ! echo "$LOG" | grep -qx "upstream main commit"; then
+            echo "FAIL: feature was not rebased on origin_branch main"
+            exit 1
+          fi
+          if echo "$LOG" | grep -qx "old feature commit"; then
+            echo "FAIL: old feature commit should have been overwritten by force push"
+            exit 1
+          fi
+          MAIN_MSG=$(git --git-dir=/tmp/gtp-origin/remote.git log -1 --format=%s main)
+          if [ "$MAIN_MSG" != "upstream main commit" ]; then
+            echo "FAIL: remote main should be unchanged, got '$MAIN_MSG'"
+            exit 1
+          fi
+          echo "PASS"

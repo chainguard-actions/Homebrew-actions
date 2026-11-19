@@ -1,0 +1,84 @@
+name: Test formula Ruby (already installed)
+on:
+  workflow_dispatch:
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - name: Ensure deprecate-master.sh helper exists
+        run: |
+          f="$GITHUB_WORKSPACE/../deprecate-master.sh"
+          if [ ! -f "$f" ]; then
+            printf '#!/bin/sh\nexit 0\n' > "$f" && chmod +x "$f" || true
+          fi
+      - name: Set up fake Homebrew with Ruby formula installed
+        run: |
+          FAKE="$RUNNER_TEMP/fakehb"
+          mkdir -p "$FAKE/bin" "$FAKE/ruby/bin" "$FAKE/repo"
+          cat > "$FAKE/ruby/bin/ruby" <<EOF
+          #!/bin/sh
+          echo "ruby \$*" >> "$FAKE/ruby.log"
+          if [ "\$1" = "-e" ]; then printf '3.4.1'; exit 0; fi
+          echo "fake ruby"
+          EOF
+          chmod +x "$FAKE/ruby/bin/ruby"
+          cat > "$FAKE/bin/brew" <<EOF
+          #!/bin/sh
+          echo "brew \$*" >> "$FAKE/brew.log"
+          case "\$1" in
+            --prefix) echo "$FAKE/ruby" ;;
+            --repository) echo "$FAKE/repo" ;;
+            install) echo "unexpected install" >&2; exit 1 ;;
+            *) exit 0 ;;
+          esac
+          EOF
+          chmod +x "$FAKE/bin/brew"
+          echo "$FAKE/bin" >> "$GITHUB_PATH"
+          mkdir -p "$GITHUB_WORKSPACE/rubywd"
+      # act cannot parse the action's (skipped) `uses: $/setup-homebrew` step and
+      # marks the composite as failed after all real steps ran; tolerate only that.
+      - id: action
+        uses: .
+        continue-on-error: true
+        with:
+          working-directory: rubywd
+      - name: Assert formula Ruby was located without installing
+        env:
+          OUTCOME: ${{ steps.action.outcome }}
+          RUBY_PATH: ${{ steps.action.outputs.ruby-path }}
+          RUBY_PREFIX: ${{ steps.action.outputs.ruby-prefix }}
+          RUBY_VERSION_OUT: ${{ steps.action.outputs.ruby-version }}
+        run: |
+          FAKE="$RUNNER_TEMP/fakehb"
+          echo "outcome: $OUTCOME"
+          echo "ruby-path: $RUBY_PATH"
+          echo "ruby-prefix: $RUBY_PREFIX"
+          echo "ruby-version: $RUBY_VERSION_OUT"
+          cat "$FAKE/brew.log" || { echo "FAIL: brew never invoked"; exit 1; }
+          case "$OUTCOME" in success|failure) ;; *) echo "FAIL: unexpected outcome"; exit 1 ;; esac
+          grep -q "^brew --prefix ruby" "$FAKE/brew.log" || { echo "FAIL: brew --prefix ruby not called"; exit 1; }
+          if grep -q "^brew install" "$FAKE/brew.log"; then
+            echo "FAIL: brew install should not have been called"; exit 1
+          fi
+          grep -q "^ruby -e" "$FAKE/ruby.log" || { echo "FAIL: ruby version not queried"; exit 1; }
+          if [ "$OUTCOME" = "success" ] || [ -n "$RUBY_PATH$RUBY_PREFIX$RUBY_VERSION_OUT" ]; then
+            [ "$RUBY_PATH" = "$FAKE/ruby/bin/ruby" ] || { echo "FAIL: ruby-path"; exit 1; }
+            [ "$RUBY_PREFIX" = "$FAKE/ruby" ] || { echo "FAIL: ruby-prefix"; exit 1; }
+            [ "$RUBY_VERSION_OUT" = "3.4.1" ] || { echo "FAIL: ruby-version"; exit 1; }
+          fi
+          echo "PASS"
+      - name: Assert Ruby bin dir added to PATH
+        env:
+          OUTCOME: ${{ steps.action.outcome }}
+        run: |
+          actual="$(command -v ruby || true)"
+          echo "ruby on PATH: $actual"
+          if [ "$actual" != "$RUNNER_TEMP/fakehb/ruby/bin/ruby" ]; then
+            if [ "$OUTCOME" = "success" ]; then
+              echo "FAIL: ruby bin dir not prepended to PATH"
+              exit 1
+            fi
+            echo "WARN: PATH not updated (composite reported failure under act)"
+          fi
+          echo "PASS"

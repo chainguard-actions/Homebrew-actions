@@ -1,0 +1,37 @@
+name: Test Brewfile mode
+on:
+  workflow_dispatch:
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - name: Set up fake brew and Brewfile
+        run: |
+          bash "$GITHUB_WORKSPACE/tests/fixtures/setup-fake-brew.sh"
+          printf 'brew "hello"\nbrew "jq"\n' > "$GITHUB_WORKSPACE/Brewfile"
+      - id: action
+        uses: .
+        with:
+          brewfile: "true"
+      - name: Assert Brewfile used
+        env:
+          KEY: ${{ steps.action.outputs.cache-key }}
+        run: |
+          rm -f "$GITHUB_WORKSPACE/Brewfile"
+          cat /tmp/fakebrew/calls.log
+          echo "cache-key: $KEY"
+          EXPECTED="$(printf 'hello 2.12.1 0\njq 1.7.1 1\n' | sha256sum | cut -d' ' -f1)"
+          if [ "$KEY" != "$EXPECTED" ]; then
+            echo "FAIL: expected cache-key $EXPECTED"
+            exit 1
+          fi
+          if ! grep -qx 'brew bundle --file Brewfile' /tmp/fakebrew/calls.log; then
+            echo "FAIL: brew bundle --file Brewfile not called"
+            exit 1
+          fi
+          if grep -q '^brew install' /tmp/fakebrew/calls.log; then
+            echo "FAIL: brew install should not run in Brewfile mode"
+            exit 1
+          fi
+          echo "PASS"

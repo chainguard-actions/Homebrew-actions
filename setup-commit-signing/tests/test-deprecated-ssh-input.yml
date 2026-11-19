@@ -1,0 +1,33 @@
+name: Test deprecated ssh input has no effect
+on:
+  workflow_dispatch:
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - name: Generate key and configure git identity
+        id: keygen
+        run: |
+          git config --global user.email "dep@example.com"
+          git config --global user.name "Dep User"
+          tmp="$(mktemp -d)"
+          ssh-keygen -q -t ed25519 -N "" -C "dep@example.com" -f "$tmp/key"
+          {
+            echo "key<<EOF_SIGNING_KEY"
+            cat "$tmp/key"
+            echo "EOF_SIGNING_KEY"
+          } >> "$GITHUB_OUTPUT"
+      - id: action
+        uses: .
+        with:
+          signing_key: ${{ steps.keygen.outputs.key }}
+          ssh: "true"
+      - name: Assert SSH signing configured
+        run: |
+          fmt="$(git config --global gpg.format)"
+          sign="$(git config --global commit.gpgsign)"
+          echo "gpg.format=$fmt commit.gpgsign=$sign"
+          [ "$fmt" = "ssh" ] || { echo "FAIL: gpg.format"; exit 1; }
+          [ "$sign" = "true" ] || { echo "FAIL: commit.gpgsign"; exit 1; }
+          echo "PASS"

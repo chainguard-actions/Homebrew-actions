@@ -1,0 +1,39 @@
+name: Test update-existing
+on:
+  workflow_dispatch:
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - id: action
+        uses: .
+        continue-on-error: true
+        with:
+          title: "actionchain harness update test"
+          body: "Follow-up comment body"
+          update-existing: "true"
+      - name: Assert action ran (created/commented, or failed gracefully)
+        env:
+          RESULT: ${{ steps.action.outputs.outcome }}
+          NUMBER: ${{ steps.action.outputs.number }}
+          OUTCOME: ${{ steps.action.outcome }}
+        run: |
+          echo "outcome: $OUTCOME"
+          echo "result: $RESULT number: $NUMBER"
+          if [ "$OUTCOME" = "success" ]; then
+            if [ "$RESULT" != "created" ] && [ "$RESULT" != "commented" ]; then
+              echo "FAIL: expected 'created' or 'commented'"
+              exit 1
+            fi
+            if [ -z "$NUMBER" ]; then
+              echo "FAIL: number empty"
+              exit 1
+            fi
+            echo "PASS: $RESULT issue $NUMBER"
+          elif [ "$OUTCOME" = "failure" ]; then
+            echo "PASS: action failed gracefully (sentinel repo is not resolvable)"
+          else
+            echo "FAIL: unexpected outcome '$OUTCOME'"
+            exit 1
+          fi

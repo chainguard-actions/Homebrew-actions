@@ -1,0 +1,38 @@
+name: Test bump casks
+on:
+  workflow_dispatch:
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - name: Set up mock brew and deprecation script
+        run: |
+          mkdir -p /tmp/brew-mock/bin
+          rm -f /tmp/brew-mock/brew.log
+          cat > /tmp/brew-mock/bin/brew <<'EOF'
+          #!/bin/bash
+          echo "$*" >> /tmp/brew-mock/brew.log
+          EOF
+          chmod +x /tmp/brew-mock/bin/brew
+          echo "/tmp/brew-mock/bin" >> "$GITHUB_PATH"
+          if [ ! -f "$GITHUB_WORKSPACE/../deprecate-master.sh" ]; then
+            printf '#!/bin/bash\nexit 0\n' > "$GITHUB_WORKSPACE/../deprecate-master.sh"
+            chmod +x "$GITHUB_WORKSPACE/../deprecate-master.sh"
+          fi
+      - id: action
+        uses: .
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          casks: baz qux
+          fork: "false"
+      - name: Assert brew bump called for casks only
+        run: |
+          cat /tmp/brew-mock/brew.log || true
+          EXPECTED="bump --no-fork --open-pr --casks baz qux"
+          ACTUAL="$(cat /tmp/brew-mock/brew.log)"
+          if [ "$ACTUAL" != "$EXPECTED" ]; then
+            echo "FAIL: expected '$EXPECTED', got '$ACTUAL'"
+            exit 1
+          fi
+          echo "PASS"

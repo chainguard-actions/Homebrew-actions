@@ -1,0 +1,44 @@
+name: Test push to different remote branch
+on:
+  workflow_dispatch:
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - name: Set up local bare remote and clone
+        run: |
+          set -e
+          git config --global user.email "test@example.com"
+          git config --global user.name "Test User"
+          rm -rf /tmp/gtp-rb && mkdir -p /tmp/gtp-rb
+          git init --bare -b main /tmp/gtp-rb/remote.git
+          git clone /tmp/gtp-rb/remote.git /tmp/gtp-rb/work
+          cd /tmp/gtp-rb/work
+          git checkout -B feature
+          echo "feature" > f.txt
+          git add f.txt
+          git commit -m "feature commit"
+      - id: action
+        uses: .
+        with:
+          directory: /tmp/gtp-rb/work
+          branch: feature
+          remote_branch: published
+          tries: "2"
+      - name: Assert remote has 'published' branch with feature commit
+        run: |
+          set -e
+          cd /tmp/gtp-rb/work
+          LOCAL=$(git rev-parse feature)
+          REMOTE=$(git --git-dir=/tmp/gtp-rb/remote.git rev-parse published)
+          echo "local: $LOCAL remote: $REMOTE"
+          if [ "$LOCAL" != "$REMOTE" ]; then
+            echo "FAIL: remote 'published' does not match local 'feature'"
+            exit 1
+          fi
+          if git --git-dir=/tmp/gtp-rb/remote.git rev-parse --verify -q refs/heads/feature; then
+            echo "FAIL: 'feature' branch should not exist on the remote"
+            exit 1
+          fi
+          echo "PASS"

@@ -1,0 +1,40 @@
+name: Test empty bottles directory without cleanup
+on:
+  workflow_dispatch:
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - name: Prepare empty directories
+        run: |
+          rm -rf "$GITHUB_WORKSPACE/empty-bottles" "$GITHUB_WORKSPACE/empty-logs"
+          mkdir -p "$GITHUB_WORKSPACE/empty-bottles" "$GITHUB_WORKSPACE/empty-logs"
+          echo 'log' > "$GITHUB_WORKSPACE/empty-logs/build.log"
+      - id: action
+        uses: .
+        continue-on-error: true
+        with:
+          bottles-directory: ${{ github.workspace }}/empty-bottles
+          logs-directory: ${{ github.workspace }}/empty-logs
+          runner: empty-runner
+          cleanup: "false"
+      - name: Assert bottles directory preserved and empty
+        env:
+          OUTCOME: ${{ steps.action.outcome }}
+        run: |
+          echo "outcome: $OUTCOME"
+          if [ "$OUTCOME" != "success" ] && [ "$OUTCOME" != "failure" ]; then
+            echo "FAIL: unexpected outcome '$OUTCOME'"
+            exit 1
+          fi
+          if [ ! -d "$GITHUB_WORKSPACE/empty-bottles" ]; then
+            echo "FAIL: bottles directory should not be removed when cleanup=false"
+            exit 1
+          fi
+          if [ -n "$(ls -A "$GITHUB_WORKSPACE/empty-bottles")" ]; then
+            echo "FAIL: bottles directory should still be empty"
+            ls -la "$GITHUB_WORKSPACE/empty-bottles"
+            exit 1
+          fi
+          echo "PASS"

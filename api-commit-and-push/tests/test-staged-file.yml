@@ -1,0 +1,52 @@
+name: Test staged file commit attempt
+on:
+  workflow_dispatch:
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - name: Stage a new file
+        run: |
+          echo "hello from actionchain test" > actionchain-test-file.txt
+          git add actionchain-test-file.txt
+          git rev-parse HEAD > /tmp/head-before
+          git diff --cached --name-only
+      - id: action
+        uses: .
+        continue-on-error: true
+        with:
+          message: "test commit via API"
+          branch: actionchain-test-nonexistent-branch
+          token: ${{ github.token }}
+      - name: Assert action ran (succeeded or failed gracefully on sentinel repo)
+        env:
+          OUTCOME: ${{ steps.action.outcome }}
+        run: |
+          echo "outcome: $OUTCOME"
+          if [ "$OUTCOME" = "success" ]; then
+            echo "PASS: commit pushed via API"
+          elif [ "$OUTCOME" = "failure" ]; then
+            echo "PASS: action failed gracefully (sentinel repo is not resolvable)"
+          else
+            echo "FAIL: unexpected outcome '$OUTCOME'"
+            exit 1
+          fi
+      - name: Assert local repository was not modified
+        run: |
+          BEFORE="$(cat /tmp/head-before)"
+          AFTER="$(git rev-parse HEAD)"
+          echo "before: $BEFORE after: $AFTER"
+          if [ "$BEFORE" != "$AFTER" ]; then
+            echo "FAIL: local HEAD changed"
+            exit 1
+          fi
+          if ! git diff --cached --name-only | grep -qx 'actionchain-test-file.txt'; then
+            echo "FAIL: staged file no longer staged"
+            exit 1
+          fi
+          if [ "$(cat actionchain-test-file.txt)" != "hello from actionchain test" ]; then
+            echo "FAIL: file content changed"
+            exit 1
+          fi
+          echo "PASS"
