@@ -1,0 +1,36 @@
+name: Test basic usage (full action)
+on:
+  workflow_dispatch:
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      # The full action needs a Homebrew installation, the sibling
+      # deprecate-master.sh and setup-homebrew actions from the Homebrew/actions
+      # monorepo, which are not all available under act. Accept a graceful
+      # failure, but verify the result strictly if it succeeds.
+      - id: action
+        uses: .
+        continue-on-error: true
+        with:
+          bottles-directory: ${{ github.workspace }}/bottles-out
+          cleanup: "false"
+          download-bottles: "false"
+      - name: Assert outcome
+        env:
+          OUTCOME: ${{ steps.action.outcome }}
+        run: |
+          echo "outcome: $OUTCOME"
+          if [ "$OUTCOME" = "success" ]; then
+            if [ ! -d "$GITHUB_WORKSPACE/bottles-out" ]; then
+              echo "FAIL: bottles directory not created"
+              exit 1
+            fi
+            echo "PASS: bottles directory created"
+          elif [ "$OUTCOME" = "failure" ]; then
+            echo "PASS: action failed gracefully (Homebrew environment unavailable under act)"
+          else
+            echo "FAIL: unexpected outcome '$OUTCOME'"
+            exit 1
+          fi

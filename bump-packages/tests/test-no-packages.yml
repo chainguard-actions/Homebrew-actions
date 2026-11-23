@@ -1,0 +1,33 @@
+name: Test no packages (no-op)
+on:
+  workflow_dispatch:
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - name: Ensure sibling deprecate-master.sh exists and mock brew
+        run: |
+          if [ ! -f "$GITHUB_WORKSPACE/../deprecate-master.sh" ]; then
+            printf '#!/bin/sh\necho "deprecate-master stub: $*"\n' > "$GITHUB_WORKSPACE/../deprecate-master.sh"
+            chmod +x "$GITHUB_WORKSPACE/../deprecate-master.sh"
+          fi
+          mkdir -p "$RUNNER_TEMP/fakebin"
+          cat > "$RUNNER_TEMP/fakebin/brew" <<'EOF'
+          #!/bin/bash
+          echo "$*" >> "$RUNNER_TEMP/brew-calls.log"
+          EOF
+          chmod +x "$RUNNER_TEMP/fakebin/brew"
+          echo "$RUNNER_TEMP/fakebin" >> "$GITHUB_PATH"
+      - id: action
+        uses: .
+        with:
+          token: ${{ github.token }}
+      - name: Assert brew was not invoked
+        run: |
+          if [ -f "$RUNNER_TEMP/brew-calls.log" ]; then
+            echo "FAIL: brew was called:"
+            cat "$RUNNER_TEMP/brew-calls.log"
+            exit 1
+          fi
+          echo "PASS: no brew bump calls"

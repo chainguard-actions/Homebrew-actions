@@ -1,0 +1,49 @@
+name: Test force push without lease
+on:
+  workflow_dispatch:
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - name: Set up diverged local and remote
+        run: |
+          set -e
+          rm -rf /tmp/gtp && mkdir -p /tmp/gtp
+          git init --bare /tmp/gtp/remote.git
+          git init /tmp/gtp/local
+          cd /tmp/gtp/local
+          git config user.email "test@example.com"
+          git config user.name "Test User"
+          git checkout -b main
+          echo one > a.txt && git add a.txt && git commit -m "first"
+          git remote add origin /tmp/gtp/remote.git
+          git push origin main
+          git clone -b main /tmp/gtp/remote.git /tmp/gtp/other
+          cd /tmp/gtp/other
+          git config user.email "other@example.com"
+          git config user.name "Other User"
+          echo remote > a.txt && git commit -am "conflicting remote change"
+          git push origin main
+          cd /tmp/gtp/local
+          echo local > a.txt && git commit -am "local change"
+          git rev-parse HEAD > /tmp/gtp/expected
+          git checkout -b work
+      - id: action
+        uses: .
+        with:
+          directory: /tmp/gtp/local
+          branch: main
+          force: "true"
+          no_lease: "true"
+          tries: "2"
+      - name: Assert remote overwritten with local commit
+        run: |
+          EXPECTED="$(cat /tmp/gtp/expected)"
+          ACTUAL="$(git --git-dir=/tmp/gtp/remote.git rev-parse refs/heads/main)"
+          echo "expected: $EXPECTED actual: $ACTUAL"
+          if [ "$EXPECTED" != "$ACTUAL" ]; then
+            echo "FAIL: remote main was not force-overwritten"
+            exit 1
+          fi
+          echo "PASS"

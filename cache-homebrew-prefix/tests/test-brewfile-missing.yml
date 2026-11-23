@@ -1,0 +1,33 @@
+name: Test brewfile=true without a Brewfile is rejected
+on:
+  workflow_dispatch:
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - name: Provide deprecate-master.sh helper expected next to the action
+        run: |
+          P="$(dirname "$GITHUB_WORKSPACE")/deprecate-master.sh"
+          SUDO=""; [ "$(id -u)" != "0" ] && command -v sudo >/dev/null && SUDO=sudo
+          if [ ! -e "$P" ]; then
+            printf '#!/bin/sh\nexit 0\n' | $SUDO tee "$P" >/dev/null
+            $SUDO chmod +x "$P"
+          fi
+      - name: Ensure no Brewfile in workspace
+        run: rm -f "$GITHUB_WORKSPACE/Brewfile"
+      - id: action
+        uses: .
+        continue-on-error: true
+        with:
+          brewfile: "true"
+      - name: Assert action failed
+        env:
+          OUTCOME: ${{ steps.action.outcome }}
+        run: |
+          echo "outcome: $OUTCOME"
+          if [ "$OUTCOME" != "failure" ]; then
+            echo "FAIL: expected failure when Brewfile is missing"
+            exit 1
+          fi
+          echo "PASS"

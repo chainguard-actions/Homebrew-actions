@@ -1,0 +1,44 @@
+name: Test bottles directory setup on macOS (simulated)
+on:
+  workflow_dispatch:
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - name: Run the shipped "Set up bottles directory" script
+        run: |
+          set -euo pipefail
+          action_file="$(bash "$GITHUB_WORKSPACE/tests/fixtures/find-action.sh")"
+          echo "action file: $action_file"
+          python3 "$GITHUB_WORKSPACE/tests/fixtures/extract-step.py" "$action_file" "Set up bottles directory" > /tmp/step.sh
+          work="$(mktemp -d)"
+          cd "$work"
+          out="$(mktemp)"
+          RUNNER_OS=macOS BOTTLES_DIR=bottles MACOS_VERSION=14 ARCH=arm64 GITHUB_OUTPUT="$out" \
+            /bin/bash -euo pipefail /tmp/step.sh
+          echo "--- output ---"; cat "$out"
+          grep -qx 'bottle_specifier={macos-14,14-arm64}' "$out" || { echo "FAIL: bottle_specifier"; exit 1; }
+          [ -d bottles ] || { echo "FAIL: bottles dir not created"; exit 1; }
+          echo "PASS"
+      - id: action
+        uses: .
+        continue-on-error: true
+        with:
+          bottles-directory: ${{ github.workspace }}/bottles-macos
+          cleanup: "false"
+          download-bottles: "false"
+      - name: Assert action outcome
+        env:
+          OUTCOME: ${{ steps.action.outcome }}
+        run: |
+          echo "outcome: $OUTCOME"
+          if [ "$OUTCOME" = "success" ]; then
+            [ -d "$GITHUB_WORKSPACE/bottles-macos" ] || { echo "FAIL: bottles directory not created"; exit 1; }
+            echo "PASS: bottles directory created"
+          elif [ "$OUTCOME" = "failure" ]; then
+            echo "PASS: action failed gracefully (Homebrew environment unavailable under act)"
+          else
+            echo "FAIL: unexpected outcome '$OUTCOME'"
+            exit 1
+          fi

@@ -1,0 +1,44 @@
+name: Test push to different remote branch
+on:
+  workflow_dispatch:
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - name: Set up local repo and bare remote
+        run: |
+          set -e
+          rm -rf /tmp/gtp && mkdir -p /tmp/gtp
+          git init --bare /tmp/gtp/remote.git
+          git init /tmp/gtp/local
+          cd /tmp/gtp/local
+          git config user.email "test@example.com"
+          git config user.name "Test User"
+          git checkout -b feature
+          echo one > a.txt && git add a.txt && git commit -m "first"
+          git rev-parse HEAD > /tmp/gtp/expected
+          git remote add upstream /tmp/gtp/remote.git
+          git checkout -b work
+      - id: action
+        uses: .
+        with:
+          directory: /tmp/gtp/local
+          remote: upstream
+          branch: feature
+          remote_branch: published
+          tries: "2"
+      - name: Assert remote branch 'published' created
+        run: |
+          EXPECTED="$(cat /tmp/gtp/expected)"
+          ACTUAL="$(git --git-dir=/tmp/gtp/remote.git rev-parse refs/heads/published)"
+          echo "expected: $EXPECTED actual: $ACTUAL"
+          if [ "$EXPECTED" != "$ACTUAL" ]; then
+            echo "FAIL: remote 'published' does not match local 'feature'"
+            exit 1
+          fi
+          if git --git-dir=/tmp/gtp/remote.git rev-parse --verify -q refs/heads/feature; then
+            echo "FAIL: 'feature' should not exist on remote"
+            exit 1
+          fi
+          echo "PASS"

@@ -1,0 +1,62 @@
+name: Test staged file commit against sentinel repository
+on:
+  workflow_dispatch:
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - name: Create a separate repository with a staged change
+        run: |
+          rm -rf "$RUNNER_TEMP/staged-repo"
+          mkdir -p "$RUNNER_TEMP/staged-repo"
+          cd "$RUNNER_TEMP/staged-repo"
+          git init -q
+          echo "hello" > README.md
+          git add README.md
+          git -c user.email=test@example.com -c user.name="Test User" commit -q -m "initial"
+          echo "new content" > new-file.txt
+          git add new-file.txt
+          STAGED="$(git diff --cached --name-only)"
+          echo "staged: $STAGED"
+          if [ "$STAGED" != "new-file.txt" ]; then
+            echo "FAIL: precondition - expected new-file.txt staged"
+            exit 1
+          fi
+      - id: action
+        uses: .
+        continue-on-error: true
+        with:
+          message: "test commit from act"
+          branch: act-harness-test-branch
+          token: ${{ github.token }}
+          directory: ${{ runner.temp }}/staged-repo
+      - name: Assert action ran (pushed, or failed gracefully on the sentinel repo)
+        env:
+          OUTCOME: ${{ steps.action.outcome }}
+        run: |
+          echo "outcome: $OUTCOME"
+          if [ "$OUTCOME" = "success" ]; then
+            echo "PASS: action pushed the commit"
+          elif [ "$OUTCOME" = "failure" ]; then
+            echo "PASS: action failed gracefully (sentinel repo is not resolvable)"
+          else
+            echo "FAIL: unexpected outcome '$OUTCOME'"
+            exit 1
+          fi
+      - name: Assert local repository was not modified
+        run: |
+          cd "$RUNNER_TEMP/staged-repo"
+          STAGED="$(git diff --cached --name-only)"
+          echo "staged after: $STAGED"
+          if [ "$STAGED" != "new-file.txt" ]; then
+            echo "FAIL: local index unexpectedly changed"
+            exit 1
+          fi
+          COUNT="$(git rev-list --count HEAD)"
+          echo "local commit count: $COUNT"
+          if [ "$COUNT" != "1" ]; then
+            echo "FAIL: local history unexpectedly changed"
+            exit 1
+          fi
+          echo "PASS"

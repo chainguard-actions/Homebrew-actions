@@ -1,0 +1,57 @@
+name: Test retry with rebase when remote has diverged
+on:
+  workflow_dispatch:
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - name: Set up diverged local and remote
+        run: |
+          set -e
+          rm -rf /tmp/gtp && mkdir -p /tmp/gtp
+          git init --bare /tmp/gtp/remote.git
+          git init /tmp/gtp/local
+          cd /tmp/gtp/local
+          git config user.email "test@example.com"
+          git config user.name "Test User"
+          git checkout -b main
+          echo one > a.txt && git add a.txt && git commit -m "first"
+          git remote add origin /tmp/gtp/remote.git
+          git push origin main
+          # Another clone pushes a non-conflicting commit
+          git clone -b main /tmp/gtp/remote.git /tmp/gtp/other
+          cd /tmp/gtp/other
+          git config user.email "other@example.com"
+          git config user.name "Other User"
+          echo remote > remote.txt && git add remote.txt && git commit -m "remote change"
+          git push origin main
+          # Local commit diverges
+          cd /tmp/gtp/local
+          echo local > local.txt && git add local.txt && git commit -m "local change"
+          git checkout -b work
+      - id: action
+        uses: .
+        with:
+          directory: /tmp/gtp/local
+          branch: main
+          tries: "3"
+      - name: Assert remote contains both commits
+        run: |
+          set -e
+          rm -rf /tmp/gtp/verify
+          git clone -b main /tmp/gtp/remote.git /tmp/gtp/verify
+          ls -la /tmp/gtp/verify
+          git -C /tmp/gtp/verify log --oneline
+          for f in a.txt remote.txt local.txt; do
+            if [ ! -f "/tmp/gtp/verify/$f" ]; then
+              echo "FAIL: $f missing from remote main"
+              exit 1
+            fi
+          done
+          COUNT="$(git -C /tmp/gtp/verify rev-list --count HEAD)"
+          if [ "$COUNT" != "3" ]; then
+            echo "FAIL: expected 3 linear commits, got $COUNT"
+            exit 1
+          fi
+          echo "PASS"

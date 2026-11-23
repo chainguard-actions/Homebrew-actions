@@ -1,0 +1,95 @@
+name: Test basic install with workflow key
+on:
+  workflow_dispatch:
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - name: Provide deprecate-master.sh helper expected next to the action
+        run: |
+          P="$(dirname "$GITHUB_WORKSPACE")/deprecate-master.sh"
+          SUDO=""; [ "$(id -u)" != "0" ] && command -v sudo >/dev/null && SUDO=sudo
+          if [ ! -e "$P" ]; then
+            printf '#!/bin/sh\nexit 0\n' | $SUDO tee "$P" >/dev/null
+            $SUDO chmod +x "$P"
+          fi
+      - name: Set up Homebrew
+        run: |
+          set -eu
+          SUDO=""; [ "$(id -u)" != "0" ] && command -v sudo >/dev/null && SUDO=sudo
+          {
+            echo "HOMEBREW_NO_AUTO_UPDATE=1"
+            echo "HOMEBREW_NO_ANALYTICS=1"
+            echo "HOMEBREW_NO_INSTALL_CLEANUP=1"
+            echo "HOMEBREW_NO_ENV_HINTS=1"
+            echo "HOMEBREW_FORCE_VENDOR_RUBY=1"
+          } >> "$GITHUB_ENV"
+          export HOMEBREW_NO_AUTO_UPDATE=1 HOMEBREW_NO_ANALYTICS=1 HOMEBREW_FORCE_VENDOR_RUBY=1
+          PREFIX=/home/linuxbrew/.linuxbrew
+          if [ ! -x "$PREFIX/bin/brew" ]; then
+            $SUDO mkdir -p "$PREFIX"
+            $SUDO chown -R "$(id -u):$(id -g)" /home/linuxbrew
+            git clone --depth 1 https://github.com/Homebrew/brew "$PREFIX/Homebrew"
+            mkdir -p "$PREFIX/bin"
+            ln -sf ../Homebrew/bin/brew "$PREFIX/bin/brew"
+          fi
+          echo "$PREFIX/bin" >> "$GITHUB_PATH"
+          echo "$PREFIX/sbin" >> "$GITHUB_PATH"
+          export PATH="$PREFIX/bin:$PREFIX/sbin:$PATH"
+          brew --version
+          RUBY="$(brew --repository)/Library/Homebrew/vendor/portable-ruby/current/bin/ruby"
+          if [ ! -x "$RUBY" ]; then
+            brew vendor-install ruby
+          fi
+          # Populate the API cache needed by version-hash.rb
+          brew info --formula hello >/dev/null
+          existing="$(brew list --formula 2>/dev/null || true)"
+          if [ -n "$existing" ]; then
+            brew uninstall --force --ignore-dependencies $existing
+          fi
+      - id: action
+        uses: .
+        with:
+          install: hello
+          workflow-key: ci
+      - name: Assert prefix output
+        env:
+          ACTUAL: ${{ steps.action.outputs.prefix }}
+        run: |
+          echo "actual: $ACTUAL"
+          EXPECTED="$(brew --prefix)"
+          if [ "$ACTUAL" != "$EXPECTED" ]; then
+            echo "FAIL: expected '$EXPECTED'"
+            exit 1
+          fi
+          echo "PASS"
+      - name: Assert cache-prefix output
+        env:
+          ACTUAL: ${{ steps.action.outputs.cache-prefix }}
+        run: |
+          echo "actual: $ACTUAL"
+          EXPECTED="$(. /etc/os-release; echo "${ID:-linux}-${VERSION_ID:-unknown}-$(uname -m)-ci")"
+          if [ "$ACTUAL" != "$EXPECTED" ]; then
+            echo "FAIL: expected '$EXPECTED'"
+            exit 1
+          fi
+          echo "PASS"
+      - name: Assert cache-key output is a sha256 hex digest
+        env:
+          ACTUAL: ${{ steps.action.outputs.cache-key }}
+        run: |
+          echo "actual: $ACTUAL"
+          if ! echo "$ACTUAL" | grep -qE '^[0-9a-f]{64}$'; then
+            echo "FAIL: expected 64 hex chars"
+            exit 1
+          fi
+          echo "PASS"
+      - name: Assert hello formula installed
+        run: |
+          if ! brew list --formula | grep -qx hello; then
+            echo "FAIL: hello not installed"
+            exit 1
+          fi
+          hello
+          echo "PASS"

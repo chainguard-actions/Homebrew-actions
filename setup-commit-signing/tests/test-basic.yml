@@ -1,0 +1,82 @@
+name: Test basic SSH commit signing setup
+on:
+  workflow_dispatch:
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - name: Provide sibling deprecate-master.sh (lives in the Homebrew/actions monorepo root)
+        run: |
+          target="$GITHUB_WORKSPACE/../deprecate-master.sh"
+          if [ ! -f "$target" ]; then
+            printf '#!/bin/bash\nexit 0\n' > /tmp/deprecate-master.sh
+            chmod +x /tmp/deprecate-master.sh
+            cp /tmp/deprecate-master.sh "$target" 2>/dev/null || sudo cp /tmp/deprecate-master.sh "$target"
+          fi
+      - name: Configure git identity and generate signing key
+        id: key
+        run: |
+          git config --global user.name "Test User"
+          git config --global user.email "test@example.com"
+          rm -f /tmp/test_signing_key /tmp/test_signing_key.pub
+          ssh-keygen -t ed25519 -N "" -C "test@example.com" -f /tmp/test_signing_key -q
+          {
+            echo "key<<EOF_KEY"
+            cat /tmp/test_signing_key
+            echo "EOF_KEY"
+          } >> "$GITHUB_OUTPUT"
+      - id: action
+        uses: .
+        with:
+          signing_key: ${{ steps.key.outputs.key }}
+      - name: Assert git config set for SSH signing
+        run: |
+          PUB="$(cut -d' ' -f1,2 /tmp/test_signing_key.pub)"
+          fmt="$(git config --global gpg.format)"
+          sign="$(git config --global commit.gpgsign)"
+          skey="$(git config --global user.signingkey)"
+          asf="$(git config --global gpg.ssh.allowedSignersFile)"
+          echo "gpg.format=$fmt commit.gpgsign=$sign signingkey=$skey allowedSignersFile=$asf"
+          [ "$fmt" = "ssh" ] || { echo "FAIL: gpg.format"; exit 1; }
+          [ "$sign" = "true" ] || { echo "FAIL: commit.gpgsign"; exit 1; }
+          case "$skey" in
+            "$PUB"*) ;;
+            *) echo "FAIL: user.signingkey does not match public key"; exit 1 ;;
+          esac
+          [ -n "$asf" ] || { echo "FAIL: allowedSignersFile unset"; exit 1; }
+          echo "PASS"
+      - name: Assert allowed_signers contains email and key
+        run: |
+          PUB="$(cut -d' ' -f1,2 /tmp/test_signing_key.pub)"
+          cat ~/.ssh/allowed_signers
+          if ! grep -qF "test@example.com $PUB" ~/.ssh/allowed_signers; then
+            echo "FAIL: allowed signer entry missing"
+            exit 1
+          fi
+          echo "PASS"
+      - name: Assert key loaded into SSH agent
+        run: |
+          echo "SSH_AUTH_SOCK=$SSH_AUTH_SOCK"
+          [ -n "$SSH_AUTH_SOCK" ] || { echo "FAIL: SSH_AUTH_SOCK not exported"; exit 1; }
+          FP="$(ssh-keygen -lf /tmp/test_signing_key.pub | awk '{print $2}')"
+          ssh-add -l | tee /tmp/agent.txt
+          if ! grep -qF "$FP" /tmp/agent.txt; then
+            echo "FAIL: key fingerprint $FP not in agent"
+            exit 1
+          fi
+          echo "PASS"
+      - name: Assert signed commit verifies
+        run: |
+          rm -rf /tmp/signrepo
+          mkdir /tmp/signrepo && cd /tmp/signrepo
+          git init -q
+          echo hi > file.txt
+          git add file.txt
+          git commit -q -m "signed commit"
+          git log --show-signature -1
+          if ! git verify-commit HEAD; then
+            echo "FAIL: commit signature did not verify"
+            exit 1
+          fi
+          echo "PASS"

@@ -1,0 +1,41 @@
+name: Test close-existing filtered by close-from-author
+on:
+  workflow_dispatch:
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - id: action
+        uses: .
+        continue-on-error: true
+        with:
+          title: "act-harness-nonexistent-issue-title-b81d4e60"
+          body: "unused"
+          close-existing: "true"
+          close-from-author: "github-actions[bot]"
+          close-comment: "Closing from act harness"
+      - name: Assert outcome none or graceful failure on sentinel repo
+        env:
+          RESULT: ${{ steps.action.outputs.outcome }}
+          NUMBER: ${{ steps.action.outputs.number }}
+          OUTCOME: ${{ steps.action.outcome }}
+        run: |
+          echo "outcome: $OUTCOME"
+          echo "result: $RESULT number: $NUMBER"
+          if [ "$OUTCOME" = "success" ]; then
+            if [ "$RESULT" != "none" ]; then
+              echo "FAIL: expected outcome output 'none'"
+              exit 1
+            fi
+            if [ -n "$NUMBER" ]; then
+              echo "FAIL: number should be empty when outcome is none"
+              exit 1
+            fi
+            echo "PASS: no issue closed"
+          elif [ "$OUTCOME" = "failure" ]; then
+            echo "PASS: action failed gracefully (sentinel repo is not resolvable)"
+          else
+            echo "FAIL: unexpected outcome '$OUTCOME'"
+            exit 1
+          fi

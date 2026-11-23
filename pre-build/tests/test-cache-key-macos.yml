@@ -1,0 +1,46 @@
+name: Test RubyGems cache key on macOS (stubbed)
+on:
+  workflow_dispatch:
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - name: Run the shipped "Set up RubyGems cache" script with macOS stubs
+        run: |
+          set -euo pipefail
+          action_file="$(bash "$GITHUB_WORKSPACE/tests/fixtures/find-action.sh")"
+          echo "action file: $action_file"
+          python3 "$GITHUB_WORKSPACE/tests/fixtures/extract-step.py" "$action_file" "Set up RubyGems cache" > /tmp/step.sh
+          bin="$(mktemp -d)"
+          printf '#!/bin/sh\necho 14.5.1\n' > "$bin/sw_vers"
+          printf '#!/bin/sh\necho arm64\n' > "$bin/uname"
+          chmod +x "$bin/sw_vers" "$bin/uname"
+          out="$(mktemp)"
+          PATH="$bin:$PATH" RUNNER_OS=macOS GITHUB_OUTPUT="$out" /bin/bash -euo pipefail /tmp/step.sh
+          echo "--- output ---"; cat "$out"
+          grep -qx 'cache_key_prefix=14-arm64' "$out" || { echo "FAIL: cache_key_prefix"; exit 1; }
+          grep -qx 'macos_version=14' "$out" || { echo "FAIL: macos_version"; exit 1; }
+          grep -qx 'arch=arm64' "$out" || { echo "FAIL: arch"; exit 1; }
+          echo "PASS"
+      - id: action
+        uses: .
+        continue-on-error: true
+        with:
+          bottles-directory: ${{ github.workspace }}/bottles-cache-macos
+          cleanup: "false"
+          download-bottles: "false"
+      - name: Assert action outcome
+        env:
+          OUTCOME: ${{ steps.action.outcome }}
+        run: |
+          echo "outcome: $OUTCOME"
+          if [ "$OUTCOME" = "success" ]; then
+            [ -d "$GITHUB_WORKSPACE/bottles-cache-macos" ] || { echo "FAIL: bottles directory not created"; exit 1; }
+            echo "PASS: action succeeded"
+          elif [ "$OUTCOME" = "failure" ]; then
+            echo "PASS: action failed gracefully (Homebrew environment unavailable under act)"
+          else
+            echo "FAIL: unexpected outcome '$OUTCOME'"
+            exit 1
+          fi

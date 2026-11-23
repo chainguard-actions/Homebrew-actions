@@ -1,0 +1,51 @@
+name: Test post-build with empty bottles directory
+on:
+  workflow_dispatch:
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - name: Prepare empty directories
+        run: |
+          B="$RUNNER_TEMP/empty-bottles"
+          L="$RUNNER_TEMP/empty-logs"
+          rm -rf "$B" "$L"
+          mkdir -p "$B" "$L"
+          echo 'log' > "$L/a.log"
+          echo "BOTTLES_DIR=$B" >> "$GITHUB_ENV"
+          echo "LOGS_DIR=$L" >> "$GITHUB_ENV"
+      - id: action
+        uses: .
+        continue-on-error: true
+        with:
+          bottles-directory: ${{ env.BOTTLES_DIR }}
+          logs-directory: ${{ env.LOGS_DIR }}
+          runner: empty-runner
+          cleanup: "false"
+          upload-bottles: "true"
+      - name: Assert outcome
+        env:
+          OUTCOME: ${{ steps.action.outcome }}
+        run: |
+          echo "outcome: $OUTCOME"
+          if [ "$OUTCOME" = "success" ]; then
+            if [ ! -d "$BOTTLES_DIR" ]; then
+              echo "FAIL: bottles dir should remain with cleanup=false"
+              exit 1
+            fi
+            if ls "$BOTTLES_DIR"/*.json >/dev/null 2>&1; then
+              echo "FAIL: unexpected json files appeared"
+              exit 1
+            fi
+            echo "PASS: empty bottles directory handled"
+          elif [ "$OUTCOME" = "failure" ]; then
+            if [ ! -d "$BOTTLES_DIR" ]; then
+              echo "FAIL: bottles dir removed although cleanup=false"
+              exit 1
+            fi
+            echo "PASS: action failed gracefully (artifact service / sibling actions unavailable under harness)"
+          else
+            echo "FAIL: unexpected outcome '$OUTCOME'"
+            exit 1
+          fi

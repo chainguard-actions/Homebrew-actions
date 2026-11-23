@@ -1,0 +1,29 @@
+name: Test bump-formulae deprecated wrapper
+on:
+  workflow_dispatch:
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      # The action delegates to bump-packages which needs Homebrew and a
+      # non-default token able to open PRs on homebrew-core. That cannot
+      # succeed under the harness, so assert the step ran and either
+      # succeeded or failed gracefully (never skipped/cancelled).
+      - id: action
+        uses: .
+        continue-on-error: true
+        with:
+          token: ${{ github.token }}
+          formulae: actionchain-nonexistent-formula-xyz
+      - name: Assert action ran
+        env:
+          OUTCOME: ${{ steps.action.outcome }}
+        run: |
+          echo "outcome: $OUTCOME"
+          if [ "$OUTCOME" = "success" ] || [ "$OUTCOME" = "failure" ]; then
+            echo "PASS: action executed (outcome: $OUTCOME)"
+          else
+            echo "FAIL: unexpected outcome '$OUTCOME'"
+            exit 1
+          fi

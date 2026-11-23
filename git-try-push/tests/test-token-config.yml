@@ -1,0 +1,35 @@
+name: Test token configures auth header
+on:
+  workflow_dispatch:
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - name: Set up local repo
+        run: |
+          set -e
+          rm -rf /tmp/gtp && mkdir -p /tmp/gtp
+          git init /tmp/gtp/local
+          cd /tmp/gtp/local
+          git config user.email "test@example.com"
+          git config user.name "Test User"
+          git checkout -b main
+          echo one > a.txt && git add a.txt && git commit -m "first"
+      - id: action
+        uses: .
+        with:
+          directory: /tmp/gtp/local
+          token: ${{ github.token }}
+          tries: "0"
+      - name: Assert extraheader configured
+        run: |
+          VAL="$(git -C /tmp/gtp/local config --local --get http.https://github.com/.extraheader || true)"
+          if [ -z "$VAL" ]; then
+            echo "FAIL: extraheader not set"
+            exit 1
+          fi
+          case "$VAL" in
+            "AUTHORIZATION: basic "*) echo "PASS: header configured" ;;
+            *) echo "FAIL: unexpected header format"; exit 1 ;;
+          esac

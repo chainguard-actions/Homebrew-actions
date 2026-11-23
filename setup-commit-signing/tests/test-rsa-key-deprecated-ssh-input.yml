@@ -1,0 +1,60 @@
+name: Test RSA key with deprecated ssh input
+on:
+  workflow_dispatch:
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - name: Provide sibling deprecate-master.sh (lives in the Homebrew/actions monorepo root)
+        run: |
+          target="$GITHUB_WORKSPACE/../deprecate-master.sh"
+          if [ ! -f "$target" ]; then
+            printf '#!/bin/bash\nexit 0\n' > /tmp/deprecate-master.sh
+            chmod +x /tmp/deprecate-master.sh
+            cp /tmp/deprecate-master.sh "$target" 2>/dev/null || sudo cp /tmp/deprecate-master.sh "$target"
+          fi
+      - name: Configure git identity and generate RSA key
+        id: key
+        run: |
+          git config --global user.name "RSA User"
+          git config --global user.email "rsa@example.com"
+          rm -f /tmp/rsa_key /tmp/rsa_key.pub
+          ssh-keygen -t rsa -b 3072 -N "" -C "rsa@example.com" -f /tmp/rsa_key -q
+          {
+            echo "key<<EOF_KEY"
+            cat /tmp/rsa_key
+            echo "EOF_KEY"
+          } >> "$GITHUB_OUTPUT"
+      - id: action
+        uses: .
+        with:
+          signing_key: ${{ steps.key.outputs.key }}
+          ssh: "true"
+      - name: Assert signing configured with RSA key
+        run: |
+          PUB="$(cut -d' ' -f1,2 /tmp/rsa_key.pub)"
+          skey="$(git config --global user.signingkey)"
+          fmt="$(git config --global gpg.format)"
+          echo "gpg.format=$fmt signingkey=$skey"
+          [ "$fmt" = "ssh" ] || { echo "FAIL: gpg.format"; exit 1; }
+          case "$skey" in
+            ssh-rsa*) ;;
+            *) echo "FAIL: signingkey is not ssh-rsa"; exit 1 ;;
+          esac
+          case "$skey" in
+            "$PUB"*) ;;
+            *) echo "FAIL: signingkey mismatch"; exit 1 ;;
+          esac
+          grep -qF "rsa@example.com $PUB" ~/.ssh/allowed_signers || { echo "FAIL: allowed_signers"; exit 1; }
+          echo "PASS"
+      - name: Assert signed commit verifies
+        run: |
+          rm -rf /tmp/rsarepo
+          mkdir /tmp/rsarepo && cd /tmp/rsarepo
+          git init -q
+          echo rsa > f.txt
+          git add f.txt
+          git commit -q -m "rsa signed"
+          git verify-commit HEAD || { echo "FAIL: verify-commit"; exit 1; }
+          echo "PASS"

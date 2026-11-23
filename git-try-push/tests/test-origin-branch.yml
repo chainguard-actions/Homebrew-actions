@@ -1,0 +1,69 @@
+name: Test rebase on custom origin_branch
+on:
+  workflow_dispatch:
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - name: Set up remote where main lags behind upstream branch
+        run: |
+          set -e
+          rm -rf /tmp/gtp-ob && mkdir -p /tmp/gtp-ob
+          git init --bare /tmp/gtp-ob/remote.git
+          git init /tmp/gtp-ob/local
+          cd /tmp/gtp-ob/local
+          git config user.email "test@example.com"
+          git config user.name "Test User"
+          git checkout -b main
+          echo one > a.txt && git add a.txt && git commit -m "first"
+          git remote add origin /tmp/gtp-ob/remote.git
+          git push origin main
+          git clone -b main /tmp/gtp-ob/remote.git /tmp/gtp-ob/other
+          cd /tmp/gtp-ob/other
+          git config user.email "other@example.com"
+          git config user.name "Other User"
+          echo b > b.txt && git add b.txt && git commit -m "remote main change"
+          git push origin main
+          echo up > upstream-only.txt && git add upstream-only.txt && git commit -m "upstream only change"
+          git push origin HEAD:refs/heads/upstream
+          cd /tmp/gtp-ob/local
+          echo local > local.txt && git add local.txt && git commit -m "local change"
+          git checkout -b work
+      - id: action
+        uses: .
+        with:
+          directory: /tmp/gtp-ob/local
+          branch: main
+          origin_branch: upstream
+          tries: "3"
+      - name: Assert remote main was rebased on origin_branch
+        run: |
+          set -e
+          R=/tmp/gtp-ob/remote.git
+          git --git-dir=$R log --oneline main
+          for f in a.txt b.txt upstream-only.txt local.txt; do
+            if ! git --git-dir=$R cat-file -e "main:$f" 2>/dev/null; then
+              echo "FAIL: $f missing from remote main"
+              exit 1
+            fi
+          done
+          MSG="$(git --git-dir=$R log -1 --format=%s main)"
+          echo "tip: $MSG"
+          if [ "$MSG" != "local change" ]; then
+            echo "FAIL: expected local change at tip"
+            exit 1
+          fi
+          PARENT="$(git --git-dir=$R rev-parse main~1)"
+          UP="$(git --git-dir=$R rev-parse upstream)"
+          if [ "$PARENT" != "$UP" ]; then
+            echo "FAIL: local commit not rebased onto upstream"
+            exit 1
+          fi
+          CUR="$(git -C /tmp/gtp-ob/local rev-parse --abbrev-ref HEAD)"
+          echo "current branch: $CUR"
+          if [ "$CUR" != "work" ]; then
+            echo "FAIL: expected previous branch 'work' to be checked out"
+            exit 1
+          fi
+          echo "PASS"

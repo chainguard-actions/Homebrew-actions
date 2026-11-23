@@ -1,0 +1,29 @@
+name: Test empty result file is left untouched
+on:
+  workflow_dispatch:
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - name: Create empty result file
+        run: |
+          mkdir -p "$RUNNER_TEMP/empty-work"
+          : > "$RUNNER_TEMP/empty-work/empty.txt"
+          echo "WORK=$RUNNER_TEMP/empty-work" >> "$GITHUB_ENV"
+      - id: action
+        uses: .
+        with:
+          workdir: ${{ env.WORK }}
+          result_path: empty.txt
+      - name: Assert empty file not removed
+        env:
+          OUTCOME: ${{ steps.action.outcome }}
+        run: |
+          echo "outcome: $OUTCOME"
+          if [ "$OUTCOME" != "success" ]; then echo "FAIL: expected success"; exit 1; fi
+          if [ ! -e "$WORK/empty.txt" ]; then
+            echo "FAIL: empty result file should not have been removed"
+            exit 1
+          fi
+          echo "PASS"

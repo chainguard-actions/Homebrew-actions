@@ -1,0 +1,61 @@
+name: Test default (Homebrew Ruby formula)
+on:
+  workflow_dispatch:
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - name: Detect Homebrew availability
+        id: detect
+        run: |
+          if command -v brew >/dev/null 2>&1; then
+            echo "has-brew=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "has-brew=false" >> "$GITHUB_OUTPUT"
+          fi
+      - id: action
+        uses: .
+        continue-on-error: true
+      - name: Assert behaviour matches Homebrew availability
+        env:
+          HAS_BREW: ${{ steps.detect.outputs.has-brew }}
+          OUTCOME: ${{ steps.action.outcome }}
+          RUBY_PATH: ${{ steps.action.outputs.ruby-path }}
+          RUBY_PREFIX: ${{ steps.action.outputs.ruby-prefix }}
+          RUBY_VERSION_OUT: ${{ steps.action.outputs.ruby-version }}
+        run: |
+          echo "has-brew: $HAS_BREW"
+          echo "outcome: $OUTCOME"
+          echo "ruby-path: $RUBY_PATH"
+          echo "ruby-prefix: $RUBY_PREFIX"
+          echo "ruby-version: $RUBY_VERSION_OUT"
+          if [ "$HAS_BREW" = "true" ]; then
+            if [ "$OUTCOME" != "success" ]; then
+              echo "FAIL: brew is available but action did not succeed"
+              exit 1
+            fi
+            if [ -z "$RUBY_PATH" ] || [ ! -x "$RUBY_PATH" ]; then
+              echo "FAIL: ruby-path missing or not executable"
+              exit 1
+            fi
+            case "$RUBY_PATH" in
+              "$RUBY_PREFIX"/bin/ruby) ;;
+              *) echo "FAIL: ruby-path not under ruby-prefix/bin"; exit 1 ;;
+            esac
+            if ! echo "$RUBY_VERSION_OUT" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+'; then
+              echo "FAIL: ruby-version not a version string"
+              exit 1
+            fi
+            echo "PASS: Ruby set up"
+          else
+            if [ "$OUTCOME" != "failure" ]; then
+              echo "FAIL: brew is unavailable, expected action to fail but got '$OUTCOME'"
+              exit 1
+            fi
+            if [ -n "$RUBY_PATH" ]; then
+              echo "FAIL: ruby-path should be empty on failure"
+              exit 1
+            fi
+            echo "PASS: action failed as expected without Homebrew"
+          fi

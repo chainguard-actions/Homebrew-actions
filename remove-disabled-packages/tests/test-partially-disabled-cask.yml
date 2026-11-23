@@ -1,0 +1,73 @@
+name: Test partially disabled cask is reported, not removed
+on:
+  workflow_dispatch:
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - name: Set up fake brew and tap
+        run: bash "$GITHUB_WORKSPACE/tests/fixtures/setup-fake-brew.sh"
+      - name: Add a cask disabled on only some platforms
+        run: |
+          TAP="$(cat /tmp/fakebrew/tapname)"
+          OLD="$(date -d '2 years ago' +%F)"
+          echo "$OLD" > /tmp/fakebrew/olddate
+          mkdir -p /tmp/fakebrew/tap/Casks/p
+          cat > /tmp/fakebrew/tap/Casks/p/partcask.rb <<EOF
+          cask "partcask" do
+            on_arm do
+              disable! date: "$OLD", because: :unmaintained
+            end
+          end
+          EOF
+          git -C /tmp/fakebrew/tap add -A
+          git -C /tmp/fakebrew/tap commit -q -m "add partcask"
+          cat > /tmp/fakebrew/info/cask.json <<EOF
+          {"formulae":[],"casks":[{"token":"partcask","tap":"$TAP","disabled":true,"disable_date":"$OLD","supported_platforms":["arm64_sequoia","sequoia"],"variations":{"sequoia":{"disabled":false,"disable_date":null}},"ruby_source_path":"Casks/p/partcask.rb"}]}
+          EOF
+          cat /tmp/fakebrew/info/cask.json
+      # act cannot parse the action's internal "uses: $/setup-ruby" reference and
+      # marks the composite step failed even though main.rb runs and sets outputs.
+      # Accept success/failure outcome, but strictly verify outputs and side effects.
+      - id: action
+        uses: .
+        continue-on-error: true
+      - name: Assert action step ran
+        env:
+          OUTCOME: ${{ steps.action.outcome }}
+          REMOVED: ${{ steps.action.outputs.packages-removed }}
+        run: |
+          echo "outcome: $OUTCOME"
+          if [ "$OUTCOME" != "success" ] && [ "$OUTCOME" != "failure" ]; then
+            echo "FAIL: unexpected outcome '$OUTCOME'"
+            exit 1
+          fi
+          if [ "$REMOVED" != "true" ] && [ "$REMOVED" != "false" ]; then
+            echo "FAIL: main.rb did not set packages-removed (got '$REMOVED')"
+            exit 1
+          fi
+          echo "PASS"
+      - name: Assert cask reported but kept
+        env:
+          REMOVED: ${{ steps.action.outputs.packages-removed }}
+          PARTIAL: ${{ steps.action.outputs.partially-disabled-packages }}
+        run: |
+          echo "packages-removed: $REMOVED"
+          echo "partially-disabled-packages: $PARTIAL"
+          OLD="$(cat /tmp/fakebrew/olddate)"
+          if [ "$REMOVED" != "false" ]; then
+            echo "FAIL: expected packages-removed=false"
+            exit 1
+          fi
+          if [ ! -f /tmp/fakebrew/tap/Casks/p/partcask.rb ]; then
+            echo "FAIL: partcask.rb was removed"
+            exit 1
+          fi
+          for needle in '`partcask`' "cask, disabled $OLD" "Casks/p/partcask.rb"; do
+            if ! printf '%s' "$PARTIAL" | grep -qF -- "$needle"; then
+              echo "FAIL: partially-disabled-packages missing '$needle'"
+              exit 1
+            fi
+          done
+          echo "PASS"

@@ -1,0 +1,39 @@
+name: Test cask=shallow
+on:
+  workflow_dispatch:
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - id: action
+        uses: .
+        with:
+          cask: shallow
+      - name: Assert shallow homebrew/cask tap
+        run: |
+          BREW="$(command -v brew || true)"
+          for c in /home/linuxbrew/.linuxbrew/bin/brew /opt/homebrew/bin/brew /usr/local/bin/brew; do
+            [ -z "$BREW" ] && [ -x "$c" ] && BREW="$c"
+          done
+          echo "brew: $BREW"
+          if [ -z "$BREW" ]; then echo "FAIL: brew not found"; exit 1; fi
+          TAP="$("$BREW" --repo)/Library/Taps/homebrew/homebrew-cask"
+          echo "tap: $TAP"
+          if [ ! -d "$TAP/.git" ]; then
+            echo "FAIL: homebrew-cask tap not cloned"
+            exit 1
+          fi
+          SHALLOW="$(git -C "$TAP" rev-parse --is-shallow-repository)"
+          echo "shallow: $SHALLOW"
+          if [ "$SHALLOW" != "true" ]; then
+            echo "FAIL: expected shallow clone"
+            exit 1
+          fi
+          PROTO="$(git -C "$TAP" config --get protocol.allow || true)"
+          echo "protocol.allow: $PROTO"
+          if [ "$PROTO" != "never" ]; then
+            echo "FAIL: expected protocol.allow=never"
+            exit 1
+          fi
+          echo "PASS"

@@ -1,0 +1,31 @@
+name: Test custom workdir, result path, and collapse
+on:
+  workflow_dispatch:
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - name: Create result file
+        run: |
+          mkdir -p "$RUNNER_TEMP/custom-work/out"
+          printf 'custom output\n' > "$RUNNER_TEMP/custom-work/out/result.log"
+          echo "WORK=$RUNNER_TEMP/custom-work" >> "$GITHUB_ENV"
+      - id: action
+        uses: .
+        with:
+          workdir: ${{ env.WORK }}
+          result_path: out/result.log
+          step_name: Custom heading
+          collapse: 'true'
+      - name: Assert result file consumed
+        env:
+          OUTCOME: ${{ steps.action.outcome }}
+        run: |
+          echo "outcome: $OUTCOME"
+          if [ "$OUTCOME" != "success" ]; then echo "FAIL: action failed"; exit 1; fi
+          if [ -e "$WORK/out/result.log" ]; then
+            echo "FAIL: result file should have been removed"
+            exit 1
+          fi
+          echo "PASS"

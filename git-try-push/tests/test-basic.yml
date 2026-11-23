@@ -1,0 +1,46 @@
+name: Test basic push
+on:
+  workflow_dispatch:
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - name: Set up local repo and bare remote
+        run: |
+          set -e
+          rm -rf /tmp/gtp && mkdir -p /tmp/gtp
+          git init --bare /tmp/gtp/remote.git
+          git init /tmp/gtp/local
+          cd /tmp/gtp/local
+          git config user.email "test@example.com"
+          git config user.name "Test User"
+          git checkout -b main
+          echo one > a.txt && git add a.txt && git commit -m "first"
+          git remote add origin /tmp/gtp/remote.git
+          git push origin main
+          echo two > b.txt && git add b.txt && git commit -m "second"
+          git rev-parse HEAD > /tmp/gtp/expected
+          git checkout -b work
+      - id: action
+        uses: .
+        with:
+          directory: /tmp/gtp/local
+          branch: main
+          tries: "3"
+      - name: Assert remote updated and previous branch restored
+        run: |
+          EXPECTED="$(cat /tmp/gtp/expected)"
+          ACTUAL="$(git --git-dir=/tmp/gtp/remote.git rev-parse refs/heads/main)"
+          echo "expected: $EXPECTED actual: $ACTUAL"
+          if [ "$EXPECTED" != "$ACTUAL" ]; then
+            echo "FAIL: remote main not updated"
+            exit 1
+          fi
+          CUR="$(git -C /tmp/gtp/local rev-parse --abbrev-ref HEAD)"
+          echo "current branch: $CUR"
+          if [ "$CUR" != "work" ]; then
+            echo "FAIL: expected previous branch 'work' to be checked out"
+            exit 1
+          fi
+          echo "PASS"

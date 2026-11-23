@@ -1,0 +1,59 @@
+name: Test post-build without upload or cleanup
+on:
+  workflow_dispatch:
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - name: Prepare fake bottles and logs directories
+        run: |
+          B="$RUNNER_TEMP/bottles"
+          L="$RUNNER_TEMP/logs"
+          rm -rf "$B" "$L"
+          mkdir -p "$B/failed" "$B/logs" "$B/home" "$B/artifact-cache" "$L"
+          echo '{}' > "$B/foo--1.0.x86_64_linux.bottle.json"
+          echo 'bottle' > "$B/foo--1.0.x86_64_linux.bottle.tar.gz"
+          echo '{}' > "$B/failed/bar--2.0.x86_64_linux.bottle.json"
+          echo 'dep' > "$B/tested-dependents-linux.txt"
+          echo 'steps summary' > "$B/steps_output.txt"
+          echo 'log line' > "$L/test.log"
+          echo "BOTTLES_DIR=$B" >> "$GITHUB_ENV"
+          echo "LOGS_DIR=$L" >> "$GITHUB_ENV"
+      - id: action
+        uses: .
+        continue-on-error: true
+        with:
+          bottles-directory: ${{ env.BOTTLES_DIR }}
+          logs-directory: ${{ env.LOGS_DIR }}
+          runner: ubuntu-test
+          cleanup: "false"
+          upload-bottles: "false"
+      - name: Assert outcome and file cleanup
+        env:
+          OUTCOME: ${{ steps.action.outcome }}
+        run: |
+          echo "outcome: $OUTCOME"
+          ls -la "$BOTTLES_DIR" || true
+          if [ "$OUTCOME" = "success" ]; then
+            if [ ! -f "$BOTTLES_DIR/foo--1.0.x86_64_linux.bottle.json" ]; then
+              echo "FAIL: bottle json should remain (cleanup=false)"
+              exit 1
+            fi
+            for p in failed logs home artifact-cache tested-dependents-linux.txt; do
+              if [ -e "$BOTTLES_DIR/$p" ]; then
+                echo "FAIL: $p should have been deleted"
+                exit 1
+              fi
+            done
+            echo "PASS: unneeded files deleted, bottles kept"
+          elif [ "$OUTCOME" = "failure" ]; then
+            if [ ! -d "$BOTTLES_DIR" ]; then
+              echo "FAIL: bottles dir removed although cleanup=false"
+              exit 1
+            fi
+            echo "PASS: action failed gracefully (sibling actions/artifact service unavailable under harness)"
+          else
+            echo "FAIL: unexpected outcome '$OUTCOME'"
+            exit 1
+          fi
